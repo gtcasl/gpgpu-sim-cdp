@@ -47,7 +47,7 @@ char filename [1024];
 %union {
 	char* string_value;
 }
-%token <string_value> H_SEPARATOR H_ARCH H_CODEVERSION H_PRODUCER H_HOST H_COMPILESIZE H_IDENTIFIER
+%token <string_value> H_SEPARATOR H_ARCH H_CODEVERSION H_PRODUCER H_HOST H_COMPILESIZE H_COMPRESSED H_IDENTIFIER
 %token <string_value> CODEVERSION
 %token <string_value> STRING
 %token <string_value> FILENAME
@@ -90,13 +90,17 @@ section :	PTXHEADER {
 				fclose(sassfile);
 			};
 
+cline :		H_COMPRESSED
+		|	;
+
 headerinfo :	H_SEPARATOR NEWLINE
 				H_ARCH IDENTIFIER NEWLINE
 				H_CODEVERSION CODEVERSION NEWLINE
 				H_PRODUCER IDENTIFIER NEWLINE
 				H_HOST IDENTIFIER NEWLINE
 				H_COMPILESIZE IDENTIFIER NEWLINE
-				H_IDENTIFIER FILENAME emptylines {setCuobjdumparch($4); setCuobjdumpidentifier($19);};
+				cline
+				H_IDENTIFIER FILENAME emptylines {setCuobjdumparch($4); setCuobjdumpidentifier($20);};
 
 ptxcode :	ptxcode PTXLINE {fprintf(ptxfile, "%s", $2);}
 		|	;

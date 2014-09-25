@@ -1425,6 +1425,7 @@ void printSectionList(std::list<cuobjdumpSection*> sl) {
 
 //! Remove unecessary sm versions from the section list
 std::list<cuobjdumpSection*> pruneSectionList(std::list<cuobjdumpSection*> cuobjdumpSectionList, CUctx_st *context) {
+
 	unsigned forced_max_capability = context->get_device()->get_gpgpu()->get_config().get_forced_max_capability();
 
 	//For ptxplus, force the max capability to 19 if it's higher or unspecified(0)
@@ -1492,7 +1493,7 @@ cuobjdumpELFSection* findELFSection(const std::string identifier){
 	if (sec!=NULL)return sec;
 	sec = findELFSectionInList(libSectionList, identifier);
 	if (sec!=NULL)return sec;
-	std::cout << "Cound not find " << identifier << std::endl;
+	std::cout << "Could not find " << identifier << std::endl;
 	assert(0 && "Could not find the required ELF section");
 	return NULL;
 }
@@ -1519,7 +1520,7 @@ cuobjdumpPTXSection* findPTXSection(const std::string identifier){
 	if (sec!=NULL)return sec;
 	sec = findPTXSectionInList(libSectionList, identifier);
 	if (sec!=NULL)return sec;
-	std::cout << "Cound not find " << identifier << std::endl;
+	std::cout << "Could not find " << identifier << std::endl;
 	assert(0 && "Could not find the required PTX section");
 	return NULL;
 }
