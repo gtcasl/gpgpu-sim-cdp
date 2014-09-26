@@ -71,6 +71,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 %token  VERSION_DIRECTIVE
 %token  ADDRESS_SIZE_DIRECTIVE
 %token  VISIBLE_DIRECTIVE
+%token  WEAK_DIRECTIVE
 %token  <string_value> IDENTIFIER
 %token  <int_value> INT_OPERAND
 %token  <float_value> FLOAT_OPERAND
@@ -235,9 +236,11 @@ function_ident_param: IDENTIFIER { add_function_name($1); } LEFT_PAREN {func_hea
 	;
 
 function_decl_header: ENTRY_DIRECTIVE { $$ = 1; g_func_decl=1; func_header(".entry"); }
+	| VISIBLE_DIRECTIVE ENTRY_DIRECTIVE { $$ = 1; g_func_decl=1; func_header(".entry"); }
 	| FUNC_DIRECTIVE { $$ = 0; g_func_decl=1; func_header(".func"); }
 	| VISIBLE_DIRECTIVE FUNC_DIRECTIVE { $$ = 0; g_func_decl=1; func_header(".func"); }
 	| EXTERN_DIRECTIVE FUNC_DIRECTIVE { $$ = 2; g_func_decl=1; func_header(".func"); }
+	| WEAK_DIRECTIVE FUNC_DIRECTIVE { $$ = 0; g_func_decl=1; func_header(".func"); }
 	;
 
 param_list: /*empty*/
