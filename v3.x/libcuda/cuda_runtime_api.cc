@@ -1306,7 +1306,7 @@ void extract_code_using_cuobjdump(){
 	printf("Running md5sum using \"%s\"\n", command);
 	system(command);
 	// Running cuobjdump using dynamic link to current process
-	snprintf(command,1000,"$CUDA_INSTALL_PATH/bin/cuobjdump -ptx -elf -sass %s > %s", app_binary.c_str(), fname);
+	snprintf(command,1000,"$CUDA_INSTALL_PATH/bin/cuobjdump -ptx -all %s > %s", app_binary.c_str(), fname);
 	printf("Running cuobjdump using \"%s\"\n", command);
 	bool parse_output = true; 
 	int result = system(command);
@@ -1538,7 +1538,7 @@ std::map<int, std::string> fatbinmap;
 std::map<int, bool>fatbin_registered;
 
 //! Keep track of the association between filename and cubin handle
-void cuobjdumpRegisterFatBinary(unsigned int handle, char* filename){
+void cuobjdumpRegisterFatBinary(unsigned int handle, std::string filename){
 	fatbinmap[handle] = filename;
 }
 
@@ -1608,7 +1608,14 @@ void** CUDARTAPI __cudaRegisterFatBinary( void *fatCubin )
 		// - This offset differs among different CUDA and GCC versions. 
 		char * pfatbin = (char*) fatDeviceText->d; 
 		int offset = *((int*)(pfatbin+48)); 
-		char * filename = (pfatbin+16+offset); 
+		char * tmpfilename = (pfatbin+16+offset); 
+		std::string filename;
+
+		//Jin: a hacky solution for triming the trailing space
+		if(tmpfilename[strlen(tmpfilename) - 1] == ' ')
+			filename = std::string(tmpfilename).substr(0, strlen(tmpfilename)-1);
+		else
+			filename = std::string(tmpfilename);
 
 		// The extracted file name is associated with a fat_cubin_handle passed
 		// into cudaLaunch().  Inside cudaLaunch(), the associated file name is
@@ -1618,7 +1625,7 @@ void** CUDARTAPI __cudaRegisterFatBinary( void *fatCubin )
 		// file name associated with each section. 
 		unsigned long long fat_cubin_handle = next_fat_bin_handle;
 		next_fat_bin_handle++;
-		printf("GPGPU-Sim PTX: __cudaRegisterFatBinary, fat_cubin_handle = %llu, filename=%s\n", fat_cubin_handle, filename);
+		printf("GPGPU-Sim PTX: __cudaRegisterFatBinary, fat_cubin_handle = %llu, filename=%s\n", fat_cubin_handle, filename.c_str());
 		/*!
 		 * This function extracts all data from all files in first call
 		 * then for next calls, only returns the appropriate number
