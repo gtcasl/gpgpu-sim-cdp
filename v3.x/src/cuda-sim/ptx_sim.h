@@ -414,6 +414,9 @@ public:
    
    void registerExit(){m_cta_info->register_thread_exit(this);}
 
+   //Jin: get corresponding kernel grid for CDP purpose
+   kernel_info_t & get_kernel() { return m_kernel; }
+
 public:
    addr_t         m_last_effective_address;
    bool        m_branch_taken;
