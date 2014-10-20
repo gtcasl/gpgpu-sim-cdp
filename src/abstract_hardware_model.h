@@ -827,6 +827,7 @@ public:
         m_mem_accesses_created=false;
         m_cache_hit=false;
         m_is_printf=false;
+        m_is_cdp = false;
     }
     virtual ~warp_inst_t(){
     }
@@ -975,6 +976,7 @@ protected:
     unsigned cycles; // used for implementing initiation interval delay
     bool m_isatomic;
     bool m_is_printf;
+    bool m_is_cdp;
     unsigned m_warp_id;
     unsigned m_dynamic_warp_id; 
     const core_config *m_config; 

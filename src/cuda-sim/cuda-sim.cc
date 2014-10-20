@@ -604,7 +604,7 @@ void ptx_instruction::set_opcode_and_latency()
    case MEMBAR_OP: op = MEMORY_BARRIER_OP; break;
    case CALL_OP:
    {
-       if(m_is_printf)
+       if(m_is_printf || m_is_cdp)
            op = ALU_OP;
        else
            op = CALL_OPS;
@@ -612,7 +612,7 @@ void ptx_instruction::set_opcode_and_latency()
    }
    case CALLP_OP:
    {
-       if(m_is_printf)
+       if(m_is_printf || m_is_cdp)
                op = ALU_OP;
            else
                op = CALL_OPS;
@@ -1185,6 +1185,8 @@ void ptx_thread_info::ptx_exec_inst( warp_inst_t &inst, unsigned lane_id)
    bool skip = false;
    int op_classification = 0;
    addr_t pc = next_instr();
+   if(pc == 440)
+    pc = 440;
    assert( pc == inst.pc ); // make sure timing model and functional model are in sync
    const ptx_instruction *pI = m_func_info->get_instruction(pc);
    set_npc( pc + pI->inst_size() );
