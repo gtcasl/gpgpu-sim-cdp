@@ -394,7 +394,7 @@ public:
    kernel_info_t *select_kernel();
 
    const gpgpu_sim_config &get_config() const { return m_config; }
-   void gpu_print_stat();
+   void gpu_print_stat(FILE * fout);
    void dump_pipeline( int mask, int s, int m ) const;
 
    //The next three functions added to be used by the functional simulation function

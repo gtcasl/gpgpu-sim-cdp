@@ -725,15 +725,25 @@ void gpgpu_sim::update_stats() {
 
 void gpgpu_sim::print_stats()
 {
+    FILE *statfout = fopen("gpgpusim_stat.txt", "w"); 
     ptx_file_line_stats_write_file();
-    gpu_print_stat();
+    gpu_print_stat(statfout);
+    fflush(statfout);
+    fclose(statfout);
 
+    std::ofstream fouts("gpgpusim_stat.txt", std::ofstream::out | std::ofstream::app);
+    std::flush(std::cout);
+    std::streambuf * coutbuf = std::cout.rdbuf();
+    std::cout.rdbuf(fouts.rdbuf());
     if (g_network_mode) {
-        printf("----------------------------Interconnect-DETAILS--------------------------------\n" );
+        std::cout << "----------------------------Interconnect-DETAILS--------------------------------\n";
         icnt_display_stats();
         icnt_display_overall_stats();
-        printf("----------------------------END-of-Interconnect-DETAILS-------------------------\n" );
+        std::cout<< "----------------------------END-of-Interconnect-DETAILS-------------------------\n";
     }
+    std::flush(std::cout);
+    std::cout.rdbuf(coutbuf);
+    fouts.close();
 }
 
 void gpgpu_sim::deadlock_check()
@@ -880,45 +890,44 @@ void gpgpu_sim::clear_executed_kernel_info()
    m_executed_kernel_names.clear();
    m_executed_kernel_uids.clear();
 }
-void gpgpu_sim::gpu_print_stat() 
+void gpgpu_sim::gpu_print_stat(FILE * statfout) 
 {  
-   FILE *statfout = stdout; 
 
    std::string kernel_info_str = executed_kernel_info_string(); 
    fprintf(statfout, "%s", kernel_info_str.c_str()); 
 
-   printf("gpu_sim_cycle = %lld\n", gpu_sim_cycle);
-   printf("gpu_sim_insn = %lld\n", gpu_sim_insn);
-   printf("gpu_ipc = %12.4f\n", (float)gpu_sim_insn / gpu_sim_cycle);
-   printf("gpu_tot_sim_cycle = %lld\n", gpu_tot_sim_cycle+gpu_sim_cycle);
-   printf("gpu_tot_sim_insn = %lld\n", gpu_tot_sim_insn+gpu_sim_insn);
-   printf("gpu_tot_ipc = %12.4f\n", (float)(gpu_tot_sim_insn+gpu_sim_insn) / (gpu_tot_sim_cycle+gpu_sim_cycle));
-   printf("gpu_tot_issued_cta = %lld\n", gpu_tot_issued_cta);
+   fprintf(statfout, "gpu_sim_cycle = %lld\n", gpu_sim_cycle);
+   fprintf(statfout, "gpu_sim_insn = %lld\n", gpu_sim_insn);
+   fprintf(statfout, "gpu_ipc = %12.4f\n", (float)gpu_sim_insn / gpu_sim_cycle);
+   fprintf(statfout, "gpu_tot_sim_cycle = %lld\n", gpu_tot_sim_cycle+gpu_sim_cycle);
+   fprintf(statfout, "gpu_tot_sim_insn = %lld\n", gpu_tot_sim_insn+gpu_sim_insn);
+   fprintf(statfout, "gpu_tot_ipc = %12.4f\n", (float)(gpu_tot_sim_insn+gpu_sim_insn) / (gpu_tot_sim_cycle+gpu_sim_cycle));
+   fprintf(statfout, "gpu_tot_issued_cta = %lld\n", gpu_tot_issued_cta);
 
 
 
    // performance counter for stalls due to congestion.
-   printf("gpu_stall_dramfull = %d\n", gpu_stall_dramfull);
-   printf("gpu_stall_icnt2sh    = %d\n", gpu_stall_icnt2sh );
+   fprintf(statfout, "gpu_stall_dramfull = %d\n", gpu_stall_dramfull);
+   fprintf(statfout, "gpu_stall_icnt2sh    = %d\n", gpu_stall_icnt2sh );
 
    time_t curr_time;
    time(&curr_time);
    unsigned long long elapsed_time = MAX( curr_time - g_simulation_starttime, 1 );
-   printf( "gpu_total_sim_rate=%u\n", (unsigned)( ( gpu_tot_sim_insn + gpu_sim_insn ) / elapsed_time ) );
+   fprintf(statfout, "gpu_total_sim_rate=%u\n", (unsigned)( ( gpu_tot_sim_insn + gpu_sim_insn ) / elapsed_time ) );
 
    //shader_print_l1_miss_stat( stdout );
-   shader_print_cache_stats(stdout);
+   shader_print_cache_stats(statfout);
 
    cache_stats core_cache_stats;
    core_cache_stats.clear();
    for(unsigned i=0; i<m_config.num_cluster(); i++){
        m_cluster[i]->get_cache_stats(core_cache_stats);
    }
-   printf("\nTotal_core_cache_stats:\n");
-   core_cache_stats.print_stats(stdout, "Total_core_cache_stats_breakdown");
-   shader_print_scheduler_stat( stdout, false );
+   fprintf(statfout, "\nTotal_core_cache_stats:\n");
+   core_cache_stats.print_stats(statfout, "Total_core_cache_stats_breakdown");
+   shader_print_scheduler_stat( statfout, false );
 
-   m_shader_stats->print(stdout);
+   m_shader_stats->print(statfout);
 #ifdef GPGPUSIM_POWER_MODEL
    if(m_config.g_power_simulation_enabled){
 	   m_gpgpusim_wrapper->print_power_kernel_stats(gpu_sim_cycle, gpu_tot_sim_cycle, gpu_tot_sim_insn + gpu_sim_insn, kernel_info_str, true );
@@ -929,7 +938,7 @@ void gpgpu_sim::gpu_print_stat()
    // performance counter that are not local to one shader
    m_memory_stats->memlatstat_print(m_memory_config->m_n_mem,m_memory_config->nbk);
    for (unsigned i=0;i<m_memory_config->m_n_mem;i++)
-      m_memory_partition_unit[i]->print(stdout);
+      m_memory_partition_unit[i]->print(statfout);
 
    // L2 cache stats
    if(!m_memory_config->m_L2_config.disabled()){
@@ -940,33 +949,33 @@ void gpgpu_sim::gpu_print_stat()
        l2_css.clear();
        total_l2_css.clear();
 
-       printf("\n========= L2 cache stats =========\n");
+       fprintf(statfout, "\n========= L2 cache stats =========\n");
        for (unsigned i=0;i<m_memory_config->m_n_mem_sub_partition;i++){
            m_memory_sub_partition[i]->accumulate_L2cache_stats(l2_stats);
            m_memory_sub_partition[i]->get_L2cache_sub_stats(l2_css);
 
-           fprintf( stdout, "L2_cache_bank[%d]: Access = %u, Miss = %u, Miss_rate = %.3lf, Pending_hits = %u, Reservation_fails = %u\n",
+           fprintf( statfout, "L2_cache_bank[%d]: Access = %u, Miss = %u, Miss_rate = %.3lf, Pending_hits = %u, Reservation_fails = %u\n",
                     i, l2_css.accesses, l2_css.misses, (double)l2_css.misses / (double)l2_css.accesses, l2_css.pending_hits, l2_css.res_fails);
 
            total_l2_css += l2_css;
        }
        if (!m_memory_config->m_L2_config.disabled() && m_memory_config->m_L2_config.get_num_lines()) {
           //L2c_print_cache_stat();
-          printf("L2_total_cache_accesses = %u\n", total_l2_css.accesses);
-          printf("L2_total_cache_misses = %u\n", total_l2_css.misses);
+          fprintf(statfout, "L2_total_cache_accesses = %u\n", total_l2_css.accesses);
+          fprintf(statfout, "L2_total_cache_misses = %u\n", total_l2_css.misses);
           if(total_l2_css.accesses > 0)
-              printf("L2_total_cache_miss_rate = %.4lf\n", (double)total_l2_css.misses/(double)total_l2_css.accesses);
-          printf("L2_total_cache_pending_hits = %u\n", total_l2_css.pending_hits);
-          printf("L2_total_cache_reservation_fails = %u\n", total_l2_css.res_fails);
-          printf("L2_total_cache_breakdown:\n");
-          l2_stats.print_stats(stdout, "L2_cache_stats_breakdown");
-          total_l2_css.print_port_stats(stdout, "L2_cache");
+              fprintf(statfout, "L2_total_cache_miss_rate = %.4lf\n", (double)total_l2_css.misses/(double)total_l2_css.accesses);
+          fprintf(statfout, "L2_total_cache_pending_hits = %u\n", total_l2_css.pending_hits);
+          fprintf(statfout, "L2_total_cache_reservation_fails = %u\n", total_l2_css.res_fails);
+          fprintf(statfout, "L2_total_cache_breakdown:\n");
+          l2_stats.print_stats(statfout, "L2_cache_stats_breakdown");
+          total_l2_css.print_port_stats(statfout, "L2_cache");
        }
    }
 
    if (m_config.gpgpu_cflog_interval != 0) {
-      spill_log_to_file (stdout, 1, gpu_sim_cycle);
-      insn_warp_occ_print(stdout);
+      spill_log_to_file (statfout, 1, gpu_sim_cycle);
+      insn_warp_occ_print(statfout);
    }
    if ( gpgpu_ptx_instruction_classification ) {
       StatDisp( g_inst_classification_stat[g_ptx_kernel_count]);
@@ -990,11 +999,11 @@ void gpgpu_sim::gpu_print_stat()
 	   total_simt_to_mem += temp_stm;
 	   total_mem_to_simt += temp_mts;
    }
-   printf("\nicnt_total_pkts_mem_to_simt=%ld\n", total_mem_to_simt);
-   printf("icnt_total_pkts_simt_to_mem=%ld\n", total_simt_to_mem);
+   fprintf(statfout, "\nicnt_total_pkts_mem_to_simt=%ld\n", total_mem_to_simt);
+   fprintf(statfout, "icnt_total_pkts_simt_to_mem=%ld\n", total_simt_to_mem);
 
-   time_vector_print();
-   fflush(stdout);
+   time_vector_print(statfout);
+   fflush(statfout);
 
    clear_executed_kernel_info(); 
 }
