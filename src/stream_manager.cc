@@ -162,8 +162,7 @@ bool stream_operation::do_operation( gpgpu_sim *gpu )
     case stream_kernel_launch:
         if( gpu->can_start_kernel() ) {
         	gpu->set_cache_config(m_kernel->name());
-            if(g_debug_execution >= 3)
-        	    printf("kernel %d: \'%s\' transfer to GPU hardware scheduler\n", m_kernel->get_uid(), m_kernel->name().c_str() );
+        	printf("kernel %d: \'%s\' transfer to GPU hardware scheduler\n", m_kernel->get_uid(), m_kernel->name().c_str() );
             m_kernel->print_parent_info();
             if( m_sim_mode )
                 gpu->functional_launch( m_kernel );
@@ -177,8 +176,7 @@ bool stream_operation::do_operation( gpgpu_sim *gpu )
         }
         break;
     case stream_event: {
-        if(g_debug_execution >= 3)
-            printf("event update\n");
+        printf("event update\n");
         time_t wallclock = time((time_t *)NULL);
         m_event->update( gpu_tot_sim_cycle, wallclock );
         m_stream->record_next_done();
