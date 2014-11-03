@@ -1516,8 +1516,23 @@ cuobjdumpPTXSection* findPTXSectionInList(std::list<cuobjdumpSection*> sectionli
 	){
 		cuobjdumpPTXSection* ptxsection;
 		if((ptxsection=dynamic_cast<cuobjdumpPTXSection*>(*iter)) != NULL){
-			if(ptxsection->getIdentifier() == identifier)
-				return ptxsection;
+        
+            std::string ptxId = ptxsection->getIdentifier();
+    		if(ptxId[ptxId.length() - 1] == ' ')
+	    		ptxId = ptxId.substr(0, ptxId.length()-1);
+
+            std::string compId = identifier;
+    		if(identifier[identifier.length() - 1] == ' ')
+	    		compId = identifier.substr(0, identifier.length()-1);
+
+            //Jin: hack
+            if(ptxId != compId)
+                printf("Warning: __cudaRegisterFatBinary needs %s, but find PTX section with %s\n", 
+                    compId.c_str(), ptxId.c_str());
+            return ptxsection;
+
+//			if(ptxId == compId)
+//				return ptxsection;
 		}
 	}
 	return NULL;
@@ -1984,6 +1999,11 @@ __host__ cudaError_t CUDARTAPI cudaFuncSetCacheConfig(const char *func, enum cud
 	CUctx_st *context = GPGPUSim_Context();
 	context->get_device()->get_gpgpu()->set_cache_config(context->get_kernel(func)->get_name(), (FuncCache)cacheConfig);
 	return g_last_cudaError = cudaSuccess;
+}
+
+//Jin: hack for cdp
+__host__ cudaError_t CUDARTAPI cudaDeviceSetLimit(enum cudaLimit limit, size_t value) {
+    return g_last_cudaError = cudaSuccess;
 }
 #endif
 
