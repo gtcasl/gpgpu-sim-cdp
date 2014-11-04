@@ -155,6 +155,7 @@ template<unsigned BSIZE> void memory_space_impl<BSIZE>::set_watch( addr_t addr, 
 
 template class memory_space_impl<32>;
 template class memory_space_impl<64>;
+template class memory_space_impl<256>;
 template class memory_space_impl<8192>;
 template class memory_space_impl<16*1024>;
 

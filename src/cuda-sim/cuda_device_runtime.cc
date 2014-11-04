@@ -13,6 +13,7 @@
 #include "ptx_ir.h"
 #include "../stream_manager.h"
 #include "cuda_device_runtime.h"
+#include "../agg_block_group.h"
 
 #define DEV_RUNTIME_REPORT(a) \
    if( g_debug_execution ) { \
@@ -20,11 +21,65 @@
       std::cout.flush(); \
    }
 
-std::map<void *, kernel_info_t *> g_cuda_device_launch_map;
-extern stream_manager * g_stream_manager;
+class device_launch_config_t {
+
+public:
+    device_launch_config_t() {}
+
+    device_launch_config_t(dim3 _grid_dim,
+        dim3 _block_dim,
+        unsigned int _shared_mem,
+        function_info * _entry):
+            grid_dim(_grid_dim),
+            block_dim(_block_dim),
+            shared_mem(_shared_mem),
+            entry(_entry) {}
+    
+    dim3 grid_dim;
+    dim3 block_dim;
+    unsigned int shared_mem;
+    function_info * entry;
+
+};
+
+typedef enum _device_launch_op_name {
+    DEVICE_LAUNCH_AGG, //aggregated blocks
+    DEVICE_LAUNCH_CHILD //new child kernel
+}device_launch_op_name;
+
+class device_launch_operation_t {
+
+public:
+    device_launch_operation_t() {}
+    device_launch_operation_t(kernel_info_t *_grid,
+        CUstream_st * _stream,
+        agg_block_group_t * _agg_block_group,
+        device_launch_op_name _op_name) :
+            grid(_grid), stream(_stream),
+            agg_block_group(_agg_block_group),
+            op_name(_op_name) {}
+
+    kernel_info_t * grid; //either a new child grid, or a launched grid
+
+    //For child kernel only
+    CUstream_st * stream; 
+
+    //For agg only
+    agg_block_group_t * agg_block_group;
+
+    //AGG op or new child kernel
+    device_launch_op_name op_name;
+
+};
+
+
+std::map<void *, device_launch_config_t> g_cuda_device_launch_param_map;
+std::list<device_launch_operation_t> g_cuda_device_launch_op;
+extern stream_manager *g_stream_manager;
+bool g_agg_blocks_support = true;
 
 //Handling device runtime api:
-//void * cudaGetParameterBufferV2(void *func, dim3 gridDimension, dim3 blockDimension, unsigned int sharedMemSize)
+//void * cudaGetParameterBufferV2(void *func, dim3 grid_dimension, dim3 block_dimension, unsigned int shared_memSize)
 void gpgpusim_cuda_getParameterBufferV2(const ptx_instruction * pI, ptx_thread_info * thread, const function_info * target_func)
 {
     DEV_RUNTIME_REPORT("Calling cudaGetParameterBufferV2");
@@ -35,8 +90,8 @@ void gpgpusim_cuda_getParameterBufferV2(const ptx_instruction * pI, ptx_thread_i
     assert( n_args == 4 );
 
     function_info * child_kernel_entry;
-    struct dim3 gridDim, blockDim;
-    unsigned int sharedMem;
+    struct dim3 grid_dim, block_dim;
+    unsigned int shared_mem;
 
     for( unsigned arg=0; arg < n_args; arg ++ ) {
         const operand_info &actual_param_op = pI->operand_lookup(n_return+1+arg); //param#
@@ -54,20 +109,20 @@ void gpgpusim_cuda_getParameterBufferV2(const ptx_instruction * pI, ptx_thread_i
             assert(child_kernel_entry);
             DEV_RUNTIME_REPORT("child kernel name " << child_kernel_entry->get_name());
         }
-        else if(arg == 1) { //dim3 gridDim for the child kernel
+        else if(arg == 1) { //dim3 grid_dim for the child kernel
 			assert(size == sizeof(struct dim3));
-            thread->m_local_mem->read(from_addr, size, & gridDim);
-            DEV_RUNTIME_REPORT("grid (" << gridDim.x << ", " << gridDim.y << ", " << gridDim.z << ")");
+            thread->m_local_mem->read(from_addr, size, & grid_dim);
+            DEV_RUNTIME_REPORT("grid (" << grid_dim.x << ", " << grid_dim.y << ", " << grid_dim.z << ")");
         }
-        else if(arg == 2) { //dim3 blockDim for the child kernel
+        else if(arg == 2) { //dim3 block_dim for the child kernel
 			assert(size == sizeof(struct dim3));
-            thread->m_local_mem->read(from_addr, size, & blockDim);
-            DEV_RUNTIME_REPORT("block (" << blockDim.x << ", " << blockDim.y << ", " << blockDim.z << ")");
+            thread->m_local_mem->read(from_addr, size, & block_dim);
+            DEV_RUNTIME_REPORT("block (" << block_dim.x << ", " << block_dim.y << ", " << block_dim.z << ")");
         }
-        else if(arg == 3) { //unsigned int sharedMem
+        else if(arg == 3) { //unsigned int shared_mem
 			assert(size == sizeof(unsigned int));
-            thread->m_local_mem->read(from_addr, size, & sharedMem);
-            DEV_RUNTIME_REPORT("shared memory " << sharedMem);
+            thread->m_local_mem->read(from_addr, size, & shared_mem);
+            DEV_RUNTIME_REPORT("shared memory " << shared_mem);
         }
     }
 
@@ -75,17 +130,11 @@ void gpgpusim_cuda_getParameterBufferV2(const ptx_instruction * pI, ptx_thread_i
 	unsigned child_kernel_arg_size = child_kernel_entry->get_args_aligned_size();
 	void * param_buffer = thread->get_gpu()->gpu_malloc(child_kernel_arg_size);
 	DEV_RUNTIME_REPORT("child kernel arg size total " << child_kernel_arg_size << ", parameter buffer allocated at " << param_buffer);
-	
-	//create child kernel_info_t and index it with parameter_buffer address
-	kernel_info_t * child_grid = new kernel_info_t(gridDim, blockDim, child_kernel_entry);
-    kernel_info_t & parent_grid = thread->get_kernel();
-	DEV_RUNTIME_REPORT("child kernel launched by " << parent_grid.name() << ", cta (" <<
-        thread->get_ctaid().x << ", " << thread->get_ctaid().y << ", " << thread->get_ctaid().z <<
-        "), thread (" << thread->get_tid().x << ", " << thread->get_tid().y << ", " << thread->get_tid().z <<
-        ")");
-    child_grid->set_parent(&parent_grid, thread->get_ctaid(), thread->get_tid());  
-    assert(g_cuda_device_launch_map.find(param_buffer) == g_cuda_device_launch_map.end());
-    g_cuda_device_launch_map[param_buffer] = child_grid;
+
+    //store param buffer address and launch config
+    device_launch_config_t device_launch_config(grid_dim, block_dim, shared_mem, child_kernel_entry);
+    assert(g_cuda_device_launch_param_map.find(param_buffer) == g_cuda_device_launch_param_map.end());
+    g_cuda_device_launch_param_map[param_buffer] = device_launch_config;
 
 	//copy the buffer address to retval0
     const operand_info &actual_return_op = pI->operand_lookup(0); //retval0
@@ -109,10 +158,13 @@ void gpgpusim_cuda_launchDeviceV2(const ptx_instruction * pI, ptx_thread_info * 
     unsigned n_args = target_func->num_args();
     assert( n_args == 2 );
 
-    kernel_info_t * child_grid = NULL;
-    function_info * child_kernel_entry = NULL;
+    kernel_info_t * device_grid = NULL;
+    function_info * device_kernel_entry = NULL;
     void * parameter_buffer;
     struct CUstream_st * child_stream;
+    device_launch_config_t config;
+    device_launch_operation_t device_launch_op;
+
     for( unsigned arg=0; arg < n_args; arg ++ ) {
         const operand_info &actual_param_op = pI->operand_lookup(n_return+1+arg); //param#
         const symbol *formal_param = target_func->get_arg(arg); //cudaLaunchDeviceV2_param_#
@@ -128,47 +180,87 @@ void gpgpusim_cuda_launchDeviceV2(const ptx_instruction * pI, ptx_thread_info * 
             assert((size_t)parameter_buffer >= GLOBAL_HEAP_START);
             DEV_RUNTIME_REPORT("Parameter buffer locating at global memory " << parameter_buffer);
 
-            //get child grid info through parameter_buffer address
-            assert(g_cuda_device_launch_map.find(parameter_buffer) != g_cuda_device_launch_map.end());
-            child_grid = g_cuda_device_launch_map[parameter_buffer];
-            child_kernel_entry = child_grid->entry();
-            DEV_RUNTIME_REPORT("find child kernel " << child_kernel_entry->get_name());
+            //get either child grid or native grid info through parameter_buffer address
+            assert(g_cuda_device_launch_param_map.find(parameter_buffer) != g_cuda_device_launch_param_map.end());
+            config = g_cuda_device_launch_param_map[parameter_buffer];
+            //device_grid = op.grid;
+            device_kernel_entry = config.entry;
+            DEV_RUNTIME_REPORT("find device kernel " << device_kernel_entry->get_name());
 
-            //copy data in parameter_buffer to child kernel param memory
-	        unsigned child_kernel_arg_size = child_kernel_entry->get_args_aligned_size();
-            DEV_RUNTIME_REPORT("child_kernel_arg_size " << child_kernel_arg_size);
-            memory_space *child_kernel_param_mem = child_grid->get_param_memory();
+            //copy data in parameter_buffer to device kernel param memory
+	        unsigned device_kernel_arg_size = device_kernel_entry->get_args_aligned_size();
+            DEV_RUNTIME_REPORT("device_kernel_arg_size " << device_kernel_arg_size);
+            memory_space *device_kernel_param_mem;
+
+
+            //find if the same kernel has been launched before
+            device_grid = find_launched_grid(device_kernel_entry);
+
+            if(device_grid == NULL) { //first time launch, as child kernel
+            
+            	//create child kernel_info_t and index it with parameter_buffer address
+            	device_grid = new kernel_info_t(config.grid_dim, config.block_dim, device_kernel_entry);
+                kernel_info_t & parent_grid = thread->get_kernel();
+            	DEV_RUNTIME_REPORT("child kernel launched by " << parent_grid.name() << ", agg_group_id " <<
+                    thread->get_agg_group_id() << ", cta (" <<
+                    thread->get_ctaid().x << ", " << thread->get_ctaid().y << ", " << thread->get_ctaid().z <<
+                    "), thread (" << thread->get_tid().x << ", " << thread->get_tid().y << ", " << thread->get_tid().z <<
+                    ")");
+                device_grid->set_parent(&parent_grid, thread->get_agg_group_id(), thread->get_ctaid(), thread->get_tid());  
+                device_launch_op = device_launch_operation_t(device_grid, NULL, NULL, DEVICE_LAUNCH_CHILD);
+                device_kernel_param_mem = device_grid->get_param_memory(-1); //native kernel param
+            }
+            else { //launched before, as aggregated blocks
+                agg_block_group_t * agg_block_group = new agg_block_group_t(config.grid_dim, config.block_dim, device_grid);
+                
+                //add aggregated blocks
+                DEV_RUNTIME_REPORT("found launched grid with the same function " << device_grid->get_uid() << 
+                    ", appended as aggregated blocks by " << thread->get_kernel().name() << ", agg_group_id " <<
+                    thread->get_agg_group_id() << ", cta (" <<
+                    thread->get_ctaid().x << ", " << thread->get_ctaid().y << ", " << thread->get_ctaid().z <<
+                    "), thread (" << thread->get_tid().x << ", " << thread->get_tid().y << ", " << thread->get_tid().z <<
+                    ")");
+        
+                device_launch_op = device_launch_operation_t(device_grid, NULL, agg_block_group, DEVICE_LAUNCH_AGG);
+                device_kernel_param_mem = agg_block_group->get_param_memory();
+            }
+
             size_t param_start_address = 0;
             //copy in word
-            for(unsigned n = 0; n < child_kernel_arg_size; n += 4) {
+            for(unsigned n = 0; n < device_kernel_arg_size; n += 4) {
                 unsigned int oneword;
                 thread->get_gpu()->get_global_memory()->read((size_t)parameter_buffer + n, 4, &oneword);
-                child_kernel_param_mem->write(param_start_address + n, 4, &oneword, NULL, NULL); 
+                device_kernel_param_mem->write(param_start_address + n, 4, &oneword, NULL, NULL); 
             }
         }
         else if(arg == 1) { //cudaStream for the child kernel
-			assert(size == sizeof(cudaStream_t));
-            thread->m_local_mem->read(from_addr, size, &child_stream);
 
-            kernel_info_t & parent_kernel = thread->get_kernel();
-            if(child_stream == 0) { //default stream on device for current CTA
-                child_stream = parent_kernel.get_default_stream_cta(thread->get_ctaid()); 
-                DEV_RUNTIME_REPORT("launching child kernel " << child_grid->get_uid() << 
-                    " to default stream of the cta " << child_stream->get_uid() << ": " << child_stream);
-            }
-            else {
-               assert(parent_kernel.cta_has_stream(thread->get_ctaid(), child_stream)); 
-                DEV_RUNTIME_REPORT("launching child kernel " << child_grid->get_uid() << 
-                " to stream " << child_stream->get_uid() << ": " << child_stream);
+            if(device_launch_op.op_name == DEVICE_LAUNCH_CHILD) {
+    			assert(size == sizeof(cudaStream_t));
+                thread->m_local_mem->read(from_addr, size, &child_stream);
+    
+                kernel_info_t & parent_kernel = thread->get_kernel();
+                if(child_stream == 0) { //default stream on device for current CTA
+                    child_stream = parent_kernel.get_default_stream_cta(thread->get_agg_group_id(), thread->get_ctaid()); 
+                    DEV_RUNTIME_REPORT("launching child kernel " << device_grid->get_uid() << 
+                        " to default stream of the cta " << child_stream->get_uid() << ": " << child_stream);
+                }
+                else {
+                   assert(parent_kernel.cta_has_stream(thread->get_agg_group_id(), thread->get_ctaid(), child_stream)); 
+                    DEV_RUNTIME_REPORT("launching child kernel " << device_grid->get_uid() << 
+                    " to stream " << child_stream->get_uid() << ": " << child_stream);
+                }
+    
+                device_launch_op.stream = child_stream;
             }
         }
         
     }
 
+  
     //launch child kernel
-    stream_operation op(child_grid, g_ptx_sim_mode, child_stream);
-    g_stream_manager->push(op);
-    g_cuda_device_launch_map.erase(parameter_buffer);
+    g_cuda_device_launch_op.push_back(device_launch_op);
+    g_cuda_device_launch_param_map.erase(parameter_buffer);
 
     //set retval0
     const operand_info &actual_return_op = pI->operand_lookup(0); //retval0
@@ -224,7 +316,7 @@ void gpgpusim_cuda_streamCreateWithFlags(const ptx_instruction * pI, ptx_thread_
     }
 
     //create stream and write back to param0
-    CUstream_st * stream = thread->get_kernel().create_stream_cta(thread->get_ctaid());
+    CUstream_st * stream = thread->get_kernel().create_stream_cta(thread->get_agg_group_id(), thread->get_ctaid());
     DEV_RUNTIME_REPORT("Create stream " << stream->get_uid() << ": " << stream);
     thread->m_local_mem->write(pStream_addr, sizeof(cudaStream_t), &stream, NULL, NULL);
  
@@ -240,4 +332,51 @@ void gpgpusim_cuda_streamCreateWithFlags(const ptx_instruction * pI, ptx_thread_
     addr_t ret_param_addr = actual_return_op.get_symbol()->get_address();
 	thread->m_local_mem->write(ret_param_addr, return_size, &error, NULL, NULL);
 
+}
+
+void launch_one_device_kernel() {
+    if(!g_cuda_device_launch_op.empty()) {
+        device_launch_operation_t &op = g_cuda_device_launch_op.front();
+
+        if(op.op_name == DEVICE_LAUNCH_CHILD) {
+            stream_operation stream_op = stream_operation(op.grid, g_ptx_sim_mode, op.stream);
+            g_stream_manager->push(stream_op);
+        }
+        else if (op.op_name == DEVICE_LAUNCH_AGG) {
+           op.grid->add_agg_block_group(op.agg_block_group); 
+        }
+        else {
+            assert(1 && "Error: device launch operation unrecognized\n");
+        }
+        g_cuda_device_launch_op.pop_front();
+    }
+}
+
+void launch_all_device_kernels() {
+    while(!g_cuda_device_launch_op.empty()) {
+        launch_one_device_kernel();
+    }
+}
+
+kernel_info_t * find_launched_grid(function_info * kernel_entry) {
+    if(g_agg_blocks_support) {
+        kernel_info_t * grid;
+        grid = g_stream_manager->find_grid(kernel_entry);
+
+        if(grid != NULL)
+            return grid;
+        else {
+            for(auto launch_op = g_cuda_device_launch_op.begin(); 
+                launch_op != g_cuda_device_launch_op.end();
+                launch_op++) {
+                if(launch_op->op_name == DEVICE_LAUNCH_CHILD &&
+                    launch_op->grid->entry() == kernel_entry)
+                    return launch_op->grid;
+            }
+            return NULL;
+        }
+    }
+    else {
+        return NULL;
+    }
 }

@@ -48,6 +48,7 @@
 #include "../gpgpusim_entrypoint.h"
 #include "decuda_pred_table/decuda_pred_table.h"
 #include "../stream_manager.h"
+#include "cuda_device_runtime.h"
 
 int gpgpu_ptx_instruction_classification;
 void ** g_inst_classification_stat = NULL;
@@ -1032,7 +1033,9 @@ void function_info::add_param_data( unsigned argn, struct gpgpu_ptx_sim_arg *arg
 }
 
 unsigned function_info::get_args_aligned_size() {
-  
+ 
+   if(m_args_aligned_size >= 0)
+       return m_args_aligned_size;
    unsigned param_address = 0;
    unsigned int total_size = 0;
    for( std::map<unsigned,param_info>::iterator i=m_ptx_kernel_param_info.begin(); i!=m_ptx_kernel_param_info.end(); i++ ) {
@@ -1047,7 +1050,9 @@ unsigned function_info::get_args_aligned_size() {
       total_size += arg_size;
    }
 
-   return (total_size + 3) / 4 * 4; //final size aligned to word
+   m_args_aligned_size = (total_size + 3) / 4 * 4; //final size aligned to word
+   
+   return m_args_aligned_size;
 
 }
 
@@ -1401,10 +1406,11 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
       ptx_thread_info *thd = *thread_info;
       assert( thd->is_done() );
       if ( g_debug_execution==-1 ) {
+         int agg_group_id = thd->get_agg_group_id();
          dim3 ctaid = thd->get_ctaid();
          dim3 t = thd->get_tid();
-         printf("GPGPU-Sim PTX simulator:  thread exiting ctaid=(%u,%u,%u) tid=(%u,%u,%u) uid=%u\n",
-                ctaid.x,ctaid.y,ctaid.z,t.x,t.y,t.z, thd->get_uid() );
+         printf("GPGPU-Sim PTX simulator:  thread exiting agg_group_id = %d ctaid=(%u,%u,%u) tid=(%u,%u,%u) uid=%u\n",
+                agg_group_id, ctaid.x,ctaid.y,ctaid.z,t.x,t.y,t.z, thd->get_uid() );
          fflush(stdout);
       }
       thd->m_cta_info->register_deleted_thread(thd);
@@ -1467,6 +1473,7 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
 
    std::map<unsigned,memory_space*> &local_mem_lookup = local_memory_lookup[sid];
    while( kernel.more_threads_in_cta() ) {
+      int agg_group_id = kernel.get_next_agg_group_id();
       dim3 ctaid3d = kernel.get_next_cta_id();
       unsigned new_tid = kernel.get_next_thread_id();
       dim3 tid3d = kernel.get_next_thread_id_3d();
@@ -1485,8 +1492,9 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
          local_mem_lookup[new_tid] = local_mem;
       }
       thd->set_info(kernel.entry());
-      thd->set_nctaid(kernel.get_grid_dim());
+      thd->set_nctaid(kernel.get_next_grid_dim());
       thd->set_ntid(kernel.get_cta_dim());
+      thd->set_agg_group_id(agg_group_id);
       thd->set_ctaid(ctaid3d);
       thd->set_tid(tid3d);
       if( kernel.entry()->get_ptx_version().extensions() ) 
@@ -1500,8 +1508,8 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
       cta_info->add_thread(thd);
       thd->m_local_mem = local_mem;
       if ( g_debug_execution==-1 ) {
-         printf("GPGPU-Sim PTX simulator:  allocating thread ctaid=(%u,%u,%u) tid=(%u,%u,%u) @ 0x%Lx\n",
-                ctaid3d.x,ctaid3d.y,ctaid3d.z,tid3d.x,tid3d.y,tid3d.z, (unsigned long long)thd );
+         printf("GPGPU-Sim PTX simulator:  allocating thread agg_group_id=%d ctaid=(%u,%u,%u) tid=(%u,%u,%u) @ 0x%Lx\n",
+                agg_group_id, ctaid3d.x,ctaid3d.y,ctaid3d.z,tid3d.x,tid3d.y,tid3d.z, (unsigned long long)thd );
          fflush(stdout);
       }
       active_threads.push_back(thd);
@@ -1539,7 +1547,7 @@ kernel_info_t *gpgpu_opencl_ptx_sim_init_grid(class function_info *entry,
       entry->add_param_data(argcount-argn,&(*a));
       argn++;
    }
-   entry->finalize(result->get_param_memory());
+   entry->finalize(result->get_param_memory(-1)); //native kernel param
    g_ptx_kernel_count++; 
    fflush(stdout);
 
@@ -1733,13 +1741,15 @@ void gpgpu_cuda_ptx_sim_main_func( kernel_info_t &kernel, bool openCL )
             g_the_gpu->getShaderCoreConfig()->warp_size
         );
         cta.execute();
+
+        launch_all_device_kernels();
     }
     
    //registering this kernel as done      
-   extern stream_manager *g_stream_manager;
    
    //openCL kernel simulation calls don't register the kernel so we don't register its exit
    if(!openCL) {
+      extern stream_manager *g_stream_manager;
       g_stream_manager->register_finished_kernel(kernel.get_uid());
    }
 

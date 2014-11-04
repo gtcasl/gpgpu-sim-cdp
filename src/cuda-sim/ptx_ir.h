@@ -1295,6 +1295,9 @@ private:
 
    static std::vector<ptx_instruction*> s_g_pc_to_insn; // a direct mapping from PC to instruction
    static unsigned sm_next_uid;
+   
+   //Jin: arg size for child kernels
+   int m_args_aligned_size;
 };
 
 class arg_buffer_t {

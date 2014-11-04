@@ -61,6 +61,7 @@
 #include "power_stat.h"
 #include "visualizer.h"
 #include "stats.h"
+#include "../cuda-sim/cuda_device_runtime.h"
 
 #ifdef GPGPUSIM_POWER_MODEL
 #include "power_interface.h"
@@ -439,7 +440,8 @@ void gpgpu_sim_config::reg_options(option_parser_t opp)
 
 /////////////////////////////////////////////////////////////////////////////
 
-void increment_x_then_y_then_z( dim3 &i, const dim3 &bound)
+//return if overbound
+bool increment_x_then_y_then_z( dim3 &i, const dim3 &bound)
 {
    i.x++;
    if ( i.x >= bound.x ) {
@@ -447,10 +449,14 @@ void increment_x_then_y_then_z( dim3 &i, const dim3 &bound)
       i.y++;
       if ( i.y >= bound.y ) {
          i.y = 0;
-         if( i.z < bound.z ) 
-            i.z++;
+         i.z++;
+         if( i.z >= bound.z ) {
+            return true;
+         }
       }
    }
+
+   return false;
 }
 
 void gpgpu_sim::launch( kernel_info_t *kinfo )
@@ -1343,6 +1349,10 @@ void gpgpu_sim::cycle()
       }
       try_snap_shot(gpu_sim_cycle);
       spill_log_to_file (stdout, 0, gpu_sim_cycle);
+
+      //Jin: for cdp support
+      launch_one_device_kernel();
+
    }
 }
 

@@ -215,8 +215,8 @@ stream_manager::stream_manager( gpgpu_sim *gpu, bool cuda_launch_blocking )
 
 bool stream_manager::operation( bool * sim)
 {
-    pthread_mutex_lock(&m_lock);
     bool check=check_finished_kernel();
+    pthread_mutex_lock(&m_lock);
     if(check)m_gpu->print_stats();
     stream_operation op =front();
     if(!op.do_operation( m_gpu )) //not ready to execute
@@ -418,3 +418,40 @@ void stream_manager::push( stream_operation op )
     }
 }
 
+//Jin: aggregated blocks support
+kernel_info_t * stream_manager::find_grid(function_info * entry)
+{
+    kernel_info_t * grid = NULL;
+    grid = m_stream_zero.find_grid(entry);
+    if(grid != NULL)
+        return grid;
+
+    for(auto s=m_streams.begin(); s!=m_streams.end();++s ) {
+        grid = (*s)->find_grid(entry);
+        if(grid != NULL)
+            return grid;
+    }
+
+    return NULL;
+}
+
+kernel_info_t * CUstream_st::find_grid(function_info * entry) {
+    
+    kernel_info_t * grid = NULL;
+
+    pthread_mutex_lock(&m_lock);
+
+    for( auto op=m_operations.begin(); op!=m_operations.end(); op++ ) {
+        if(op->is_kernel()) {
+            kernel_info_t * kernel = op->get_kernel();
+            if(entry == kernel->entry()) {
+                grid = kernel;
+                break;
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&m_lock);
+
+    return grid;
+}

@@ -43,6 +43,9 @@
 //    unsigned m_pending_streams;
 //};
 
+class function_info;
+class kernel_info_t;
+
 enum stream_operation_type {
     stream_no_op,
     stream_memcpy_host_to_device,
@@ -223,6 +226,9 @@ public:
     void print( FILE *fp );
     unsigned get_uid() const { return m_uid; }
 
+    //Jin: support aggregated blocks
+    kernel_info_t * find_grid(function_info * entry);
+
 private:
     unsigned m_uid;
     static unsigned sm_next_stream_uid;
@@ -247,6 +253,8 @@ public:
     void print( FILE *fp);
     void push( stream_operation op );
     bool operation(bool * sim);
+    //Jin: support aggregated blocks
+    kernel_info_t * find_grid(function_info * entry);
 private:
     void print_impl( FILE *fp);
 

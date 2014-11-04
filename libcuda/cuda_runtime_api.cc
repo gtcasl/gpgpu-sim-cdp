@@ -2165,7 +2165,7 @@ kernel_info_t *gpgpu_cuda_ptx_sim_init_grid( const char *hostFun,
 		argn++;
 	}
 
-	entry->finalize(result->get_param_memory());
+	entry->finalize(result->get_param_memory(-1)); //native kernel param
 	g_ptx_kernel_count++;
 	fflush(stdout);
 
