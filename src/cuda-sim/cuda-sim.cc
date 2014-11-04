@@ -1492,7 +1492,7 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
          local_mem_lookup[new_tid] = local_mem;
       }
       thd->set_info(kernel.entry());
-      thd->set_nctaid(kernel.get_next_grid_dim());
+      thd->set_nctaid(kernel.get_grid_dim(agg_group_id));
       thd->set_ntid(kernel.get_cta_dim());
       thd->set_agg_group_id(agg_group_id);
       thd->set_ctaid(ctaid3d);

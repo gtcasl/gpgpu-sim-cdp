@@ -76,7 +76,7 @@ public:
 std::map<void *, device_launch_config_t> g_cuda_device_launch_param_map;
 std::list<device_launch_operation_t> g_cuda_device_launch_op;
 extern stream_manager *g_stream_manager;
-bool g_agg_blocks_support = true;
+bool g_agg_blocks_support = false;
 
 //Handling device runtime api:
 //void * cudaGetParameterBufferV2(void *func, dim3 grid_dimension, dim3 block_dimension, unsigned int shared_memSize)

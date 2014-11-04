@@ -556,7 +556,6 @@ kernel_info_t::kernel_info_t( dim3 gridDim, dim3 blockDim, class function_info *
     m_parent_kernel = NULL;
 
     //Jin: aggregated cta management
-    m_cur_agg_group_id = -1; //start from native ctas
     m_next_agg_group_id = -1; //start from native ctas
     m_total_agg_group_id = 0;
     m_total_num_agg_blocks = 0;
@@ -709,24 +708,12 @@ void kernel_info_t::destroy_agg_block_groups() {
     m_agg_block_groups.clear();
 }
 
-dim3 kernel_info_t::get_cur_agg_dim() const {
-    assert(m_agg_block_groups.find(m_cur_agg_group_id) !=
+dim3 kernel_info_t::get_agg_dim(int agg_group_id) const {
+    assert(m_agg_block_groups.find(agg_group_id) !=
         m_agg_block_groups.end());
-    return m_agg_block_groups.find(m_cur_agg_group_id)->second->get_agg_dim();
+    return m_agg_block_groups.find(agg_group_id)->second->get_agg_dim();
 }
 
-dim3 kernel_info_t::get_next_agg_dim() const {
-    assert(m_agg_block_groups.find(m_next_agg_group_id) !=
-        m_agg_block_groups.end());
-    return m_agg_block_groups.find(m_next_agg_group_id)->second->get_agg_dim();
-}
-
-dim3 kernel_info_t::get_next_grid_dim() const {
-   if(m_next_agg_group_id == -1) //native kernel
-      return m_grid_dim; 
-   else
-      return get_next_agg_dim();
-}
 class memory_space * kernel_info_t::get_agg_param_mem(int agg_group_id) {
     assert(m_agg_block_groups.find(agg_group_id) !=
         m_agg_block_groups.end());

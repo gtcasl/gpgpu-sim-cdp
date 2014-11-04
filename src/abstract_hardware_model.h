@@ -189,18 +189,17 @@ public:
       return m_block_dim.x * m_block_dim.y * m_block_dim.z;
    } 
 
-   dim3 get_grid_dim() const { 
-      if(m_cur_agg_group_id == -1) //native kernel
+   dim3 get_grid_dim(int agg_group_id) const { 
+      if(agg_group_id == -1) //native kernel
          return m_grid_dim; 
       else
-         return get_cur_agg_dim();
+         return get_agg_dim(agg_group_id);
    }
    dim3 get_cta_dim() const { return m_block_dim; }
 
    void increment_cta_id() 
    { 
-      m_cur_agg_group_id = m_next_agg_group_id;
-      dim3 next_grid_dim = get_grid_dim();
+      dim3 next_grid_dim = get_grid_dim(m_next_agg_group_id);
       if(increment_x_then_y_then_z(m_next_cta, next_grid_dim)) { //overbound
         m_next_agg_group_id++;
         m_next_cta.x = 0;
@@ -304,14 +303,11 @@ private:
 public:
    void add_agg_block_group(agg_block_group_t * agg_block_group);
    void destroy_agg_block_groups();
-   dim3 get_cur_agg_dim() const;
-   dim3 get_next_agg_dim() const;
-   dim3 get_next_grid_dim() const;
+   dim3 get_agg_dim(int agg_group_id) const;
    class memory_space * get_agg_param_mem(int agg_group_id);
    int get_next_agg_group_id() { return m_next_agg_group_id; }
 private:
    int m_next_agg_group_id;
-   int m_cur_agg_group_id; //agg block group id being executed, -1 means native blocks
    int m_total_agg_group_id;
    std::map<int, agg_block_group_t *> m_agg_block_groups; //aggregated block groups
    size_t m_total_num_agg_blocks; //total number of aggregated blocks

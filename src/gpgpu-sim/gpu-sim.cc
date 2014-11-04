@@ -436,6 +436,11 @@ void gpgpu_sim_config::reg_options(option_parser_t opp)
                           &Trace::sampling_memory_partition, "The memory partition which is printed using MEMPART_DPRINTF. Default -1 (i.e. all)",
                           "-1");
    ptx_file_line_stats_options(opp);
+
+    //Jin: aggregated block option
+    option_parser_register(opp, "-agg_blocks_support", OPT_BOOL, 
+                          &g_agg_blocks_support, "Turn on aggregated blocks support",
+                          "0");
 }
 
 /////////////////////////////////////////////////////////////////////////////
