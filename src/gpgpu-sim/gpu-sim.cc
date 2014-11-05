@@ -736,7 +736,7 @@ void gpgpu_sim::update_stats() {
 
 void gpgpu_sim::print_stats()
 {
-    FILE *statfout = fopen("gpgpusim_stat.txt", "w"); 
+    FILE *statfout = fopen("gpgpusim_stat.txt", "a"); 
     ptx_file_line_stats_write_file();
     gpu_print_stat(statfout);
     fflush(statfout);
