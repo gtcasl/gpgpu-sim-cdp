@@ -210,7 +210,7 @@ unsigned ptx_thread_info::get_builtin( int builtin_id, unsigned dim_mod )
       break;
    case ENVREG_REG:{
 	int index = builtin_id >> 16;
-	dim3 gdim = this->get_core()->get_kernel_info()->get_grid_dim(m_agg_group_id);
+	dim3 gdim = this->get_kernel().get_grid_dim(m_agg_group_id);
 		switch(index){
 		case 0:
 		case 1:
