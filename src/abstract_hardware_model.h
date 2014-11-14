@@ -870,7 +870,7 @@ public:
         m_mem_accesses_created=false;
         m_cache_hit=false;
         m_is_printf=false;
-        m_is_cdp = false;
+        m_is_cdp = 0;
     }
     virtual ~warp_inst_t(){
     }
@@ -1019,7 +1019,6 @@ protected:
     unsigned cycles; // used for implementing initiation interval delay
     bool m_isatomic;
     bool m_is_printf;
-    bool m_is_cdp;
     unsigned m_warp_id;
     unsigned m_dynamic_warp_id; 
     const core_config *m_config; 
@@ -1040,6 +1039,11 @@ protected:
     std::list<mem_access_t> m_accessq;
 
     static unsigned sm_next_uid;
+
+    //Jin: cdp support
+public:
+    int m_is_cdp;
+    
 };
 
 void move_warp( warp_inst_t *&dst, warp_inst_t *&src );
