@@ -1475,6 +1475,12 @@ public:
 
         m_shader_dynamic_warp_issue_distro.resize( config->num_shader() );
         m_shader_warp_slot_issue_distro.resize( config->num_shader() );
+
+        //Jin: stats for shader warp occupancy
+        m_shader_warp_active_cycles.resize(config->num_shader());
+        for(unsigned shader = 0; shader < config->num_shader(); shader++) {
+            m_shader_warp_active_cycles[shader].resize(config->max_warps_per_shader, 0);
+        }
     }
 
     ~shader_core_stats()
@@ -1519,6 +1525,9 @@ private:
     std::vector<unsigned> m_last_shader_dynamic_warp_issue_distro;
     std::vector< std::vector<unsigned> > m_shader_warp_slot_issue_distro;
     std::vector<unsigned> m_last_shader_warp_slot_issue_distro;
+
+    //Jin: shader warp occupancy 
+    std::vector< std::vector<unsigned long long> > m_shader_warp_active_cycles;
 
     friend class power_stat_t;
     friend class shader_core_ctx;
@@ -1856,7 +1865,22 @@ private:
     std::bitset<MAX_THREAD_PER_SM> m_occupied_hwtid;
     std::map<unsigned int, unsigned int> m_occupied_cta_to_hwtid; 
 
-
+    //Jin: shader occupancy stats
+public:
+    void inc_shader_warp_activity() {
+        for(unsigned int i = 0; i < m_config->n_thread_per_shader; i+= m_config->warp_size) {
+            unsigned int warp_id = i / m_config->warp_size;
+            bool warp_active = false;
+            for(unsigned int j = i; j < i+ m_config->warp_size; j++) {
+                if(m_occupied_hwtid.test(j)) {
+                    warp_active = true;
+                    break;
+                }
+            }
+            if(warp_active)
+                m_stats->m_shader_warp_active_cycles[m_sid][warp_id]++;
+        }
+    }
 };
 
 class simt_core_cluster {

@@ -273,6 +273,7 @@ public:
    bool cta_has_stream(int agg_group_id, dim3 ctaid, CUstream_st* stream);
    void print_parent_info();
    void destroy_cta_streams();
+   kernel_info_t * get_parent() { return m_parent_kernel; }
 
 private:
    kernel_info_t * m_parent_kernel;
@@ -311,6 +312,11 @@ private:
    int m_total_agg_group_id;
    std::map<int, agg_block_group_t *> m_agg_block_groups; //aggregated block groups
    size_t m_total_num_agg_blocks; //total number of aggregated blocks
+//Jin: kernel timing
+public:
+   unsigned long long launch_cycle;
+   unsigned long long start_cycle;
+   unsigned long long end_cycle;
 };
 
 struct core_config {

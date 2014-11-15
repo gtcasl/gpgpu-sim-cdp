@@ -200,6 +200,7 @@ void gpgpusim_cuda_launchDeviceV2(const ptx_instruction * pI, ptx_thread_info * 
             
             	//create child kernel_info_t and index it with parameter_buffer address
             	device_grid = new kernel_info_t(config.grid_dim, config.block_dim, device_kernel_entry);
+                device_grid->launch_cycle = gpu_sim_cycle;
                 kernel_info_t & parent_grid = thread->get_kernel();
             	DEV_RUNTIME_REPORT("child kernel launched by " << parent_grid.name() << ", agg_group_id " <<
                     thread->get_agg_group_id() << ", cta (" <<

@@ -466,6 +466,15 @@ void shader_core_stats::print( FILE* fout ) const
       fprintf(fout, "\tW%d:%d", i-2, shader_cycle_distro[i]);
    fprintf(fout, "\n");
 
+   //Jin: print shader warp occupancy
+   fprintf(fout, "Shader Warp Occupied cycles:\n");
+   for(unsigned int i = 0; i < m_config->num_shader(); i++) {
+     fprintf(fout, "Shader %d: ", i);
+     for(unsigned int j = 0; j < m_config->max_warps_per_shader; j++)
+        fprintf(fout, "%llu, ", m_shader_warp_active_cycles[i][j]);
+     fprintf(fout, "\n");
+   }
+
    m_outgoing_traffic_stats->print(fout); 
    m_incoming_traffic_stats->print(fout); 
 }
@@ -2483,6 +2492,7 @@ void shader_core_ctx::cycle()
     issue();
     decode();
     fetch();
+    inc_shader_warp_activity();
 }
 
 // Flushes all content of the cache to memory
