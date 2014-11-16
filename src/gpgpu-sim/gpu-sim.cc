@@ -443,7 +443,12 @@ void gpgpu_sim_config::reg_options(option_parser_t opp)
 
     //Jin: aggregated block option
     option_parser_register(opp, "-agg_blocks_support", OPT_BOOL, 
-                          &g_agg_blocks_support, "Turn on aggregated blocks support",
+                          &g_agg_blocks_support, "Turn on aggregated blocks support, Default: false",
+                          "0");
+    //Jin: kernel launch latency
+    extern unsigned g_kernel_launch_latency;
+    option_parser_register(opp, "-gpgpu_kernel_launch_latency", OPT_INT32, 
+                          &g_kernel_launch_latency, "Kernel launch latency in cycles. Default: 0",
                           "0");
 }
 

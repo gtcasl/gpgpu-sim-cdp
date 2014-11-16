@@ -536,6 +536,8 @@ void warp_inst_t::completed( unsigned long long cycle ) const
    ptx_file_line_stats_add_latency(pc, latency * active_count());  
 }
 
+//Jin: kernel launch latency
+unsigned g_kernel_launch_latency;
 
 unsigned kernel_info_t::m_next_uid = 1;
 
@@ -559,6 +561,9 @@ kernel_info_t::kernel_info_t( dim3 gridDim, dim3 blockDim, class function_info *
     m_next_agg_group_id = -1; //start from native ctas
     m_total_agg_group_id = 0;
     m_total_num_agg_blocks = 0;
+
+    //Jin: launch latency management
+    m_launch_latency = g_kernel_launch_latency;
 }
 
 kernel_info_t::~kernel_info_t()
