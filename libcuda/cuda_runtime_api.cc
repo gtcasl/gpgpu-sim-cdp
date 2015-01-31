@@ -1434,7 +1434,6 @@ void printSectionList(std::list<cuobjdumpSection*> sl) {
 
 //! Remove unecessary sm versions from the section list
 std::list<cuobjdumpSection*> pruneSectionList(std::list<cuobjdumpSection*> cuobjdumpSectionList, CUctx_st *context) {
-
 	unsigned forced_max_capability = context->get_device()->get_gpgpu()->get_config().get_forced_max_capability();
 
 	//For ptxplus, force the max capability to 19 if it's higher or unspecified(0)

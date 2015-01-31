@@ -536,8 +536,9 @@ void warp_inst_t::completed( unsigned long long cycle ) const
    ptx_file_line_stats_add_latency(pc, latency * active_count());  
 }
 
-//Jin: kernel launch latency
+//Jin: kernel launch latency and overhead
 unsigned g_kernel_launch_latency;
+extern unsigned long long g_total_param_size;
 
 unsigned kernel_info_t::m_next_uid = 1;
 
@@ -616,7 +617,6 @@ bool kernel_info_t::children_all_finished() {
 
 void kernel_info_t::notify_parent_finished() {
    if(m_parent_kernel) {
-       extern unsigned long long g_total_param_size;
        g_total_param_size -= ((m_kernel_entry->get_args_aligned_size() + 255)/256*256);
        m_parent_kernel->remove_child(this);
        g_stream_manager->register_finished_kernel(m_parent_kernel->get_uid());
@@ -709,6 +709,7 @@ void kernel_info_t::destroy_agg_block_groups() {
     for(auto agg_block_group = m_agg_block_groups.begin(); 
         agg_block_group != m_agg_block_groups.end();
         agg_block_group++) {
+        g_total_param_size -= ((m_kernel_entry->get_args_aligned_size() + 255)/256*256);
         delete agg_block_group->second;
     }
 
