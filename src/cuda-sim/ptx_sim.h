@@ -332,6 +332,9 @@ public:
       m_nctaid.z = 1;
       m_gridid = 0;
       m_valid = true;
+      
+      //Jin: agg block support
+      m_agg_group_id = -1;
    }
    void set_tid( dim3 tid ) { m_tid = tid; }
    void cpy_tid_to_reg( dim3 tid );
@@ -402,7 +405,7 @@ public:
    memory_space *get_global_memory() { return m_gpu->get_global_memory(); }
    memory_space *get_tex_memory() { return m_gpu->get_tex_memory(); }
    memory_space *get_surf_memory() { return m_gpu->get_surf_memory(); }
-   memory_space *get_param_memory() { return m_kernel.get_param_memory(); }
+   memory_space *get_param_memory() { return m_kernel.get_param_memory(m_agg_group_id); }
    const gpgpu_functional_sim_config &get_config() const { return m_gpu->get_config(); }
    bool isInFunctionalSimulationMode(){ return m_functionalSimulationMode;}
    void exitCore()
@@ -417,6 +420,9 @@ public:
    void and_reduction(unsigned ctaid, unsigned barid, bool value) {m_core->and_reduction(ctaid,barid,value);}
    void or_reduction(unsigned ctaid, unsigned barid, bool value) {m_core->or_reduction(ctaid,barid,value);}
    void popc_reduction(unsigned ctaid, unsigned barid, bool value) {m_core->popc_reduction(ctaid,barid,value);}
+
+   //Jin: get corresponding kernel grid for CDP purpose
+   kernel_info_t & get_kernel() { return m_kernel; }
 
 public:
    addr_t         m_last_effective_address;
@@ -471,6 +477,13 @@ private:
    bool m_enable_debug_trace;
 
    std::stack<class operand_info, std::vector<operand_info> > m_breakaddrs;
+
+   //Jin: agg blocks support
+public:
+   void set_agg_group_id( int agg_group_id) { m_agg_group_id = agg_group_id;}
+   int get_agg_group_id() const { return m_agg_group_id; }
+private:
+   int    m_agg_group_id;
 };
 
 addr_t generic_to_local( unsigned smid, unsigned hwtid, addr_t addr );

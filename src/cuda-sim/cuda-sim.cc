@@ -48,6 +48,7 @@
 #include "../gpgpusim_entrypoint.h"
 #include "decuda_pred_table/decuda_pred_table.h"
 #include "../stream_manager.h"
+#include "cuda_device_runtime.h"
 
 int gpgpu_ptx_instruction_classification;
 void ** g_inst_classification_stat = NULL;
@@ -63,6 +64,8 @@ unsigned gpgpu_param_num_shaders = 0;
 
 char *opcode_latency_int, *opcode_latency_fp, *opcode_latency_dp;
 char *opcode_initiation_int, *opcode_initiation_fp, *opcode_initiation_dp;
+char *cdp_latency_str;
+unsigned cdp_latency[5];
 
 void ptx_opcocde_latency_options (option_parser_t opp) {
 	option_parser_register(opp, "-ptx_opcode_latency_int", OPT_CSTR, &opcode_latency_int,
@@ -89,6 +92,12 @@ void ptx_opcocde_latency_options (option_parser_t opp) {
 			"Opcode initiation intervals for double precision floating points <ADD,MAX,MUL,MAD,DIV>"
 			"Default 8,8,8,8,130",
 			"8,8,8,8,130");
+	option_parser_register(opp, "-cdp_latency", OPT_CSTR, &cdp_latency_str,
+			"CDP API latency <cudaStreamCreateWithFlags, \
+cudaGetParameterBufferV2_init_perWarp, cudaGetParameterBufferV2_perKernel, \
+cudaLaunchDeviceV2_init_perWarp, cudaLaunchDevicV2_perKernel>"
+			"Default 7200,8000,100,12000,1600",
+			"7200,8000,100,12000,1600");
 }
 
 static address_type get_converge_point(address_type pc);
@@ -608,6 +617,9 @@ void ptx_instruction::set_opcode_and_latency()
 	sscanf(opcode_initiation_dp, "%u,%u,%u,%u,%u",
 			&dp_init[0],&dp_init[1],&dp_init[2],
 			&dp_init[3],&dp_init[4]);
+	sscanf(cdp_latency_str, "%u,%u,%u,%u,%u",
+			&cdp_latency[0],&cdp_latency[1],&cdp_latency[2], 
+            &cdp_latency[3],&cdp_latency[4]);
 
 	if(!m_operands.empty()){
 		std::vector<operand_info>::iterator it;
@@ -638,19 +650,21 @@ void ptx_instruction::set_opcode_and_latency()
    case MEMBAR_OP: op = MEMORY_BARRIER_OP; break;
    case CALL_OP:
    {
-       if(m_is_printf)
+       if(m_is_printf || m_is_cdp) {
            op = ALU_OP;
+       }
        else
            op = CALL_OPS;
        break;
    }
    case CALLP_OP:
    {
-       if(m_is_printf)
+       if(m_is_printf || m_is_cdp) {
                op = ALU_OP;
-           else
-               op = CALL_OPS;
-           break;
+       }
+       else
+           op = CALL_OPS;
+       break;
    }
    case RET_OP: case RETP_OP:  op = RET_OPS;break;
    case ADD_OP: case ADDP_OP: case ADDC_OP: case SUB_OP: case SUBC_OP:
@@ -872,6 +886,7 @@ void ptx_instruction::pre_decode()
 
    set_opcode_and_latency();
    set_bar_type();
+
    // Get register operands
    int n=0,m=0;
    ptx_instruction::const_iterator opr=op_iter_begin();
@@ -1065,6 +1080,31 @@ void function_info::add_param_data( unsigned argn, struct gpgpu_ptx_sim_arg *arg
    } 
 }
 
+unsigned function_info::get_args_aligned_size() {
+ 
+   if(m_args_aligned_size >= 0)
+       return m_args_aligned_size;
+   unsigned param_address = 0;
+   unsigned int total_size = 0;
+   for( std::map<unsigned,param_info>::iterator i=m_ptx_kernel_param_info.begin(); i!=m_ptx_kernel_param_info.end(); i++ ) {
+      param_info &p = i->second;
+      std::string name = p.get_name();
+      symbol *param = m_symtab->lookup(name.c_str());
+
+      size_t arg_size = p.get_size() / 8; // size of param in bytes
+      total_size = (total_size + arg_size - 1) / arg_size * arg_size; //aligned
+      p.add_offset(total_size);
+      param->set_address(param_address + total_size);
+      total_size += arg_size;
+   }
+
+   m_args_aligned_size = (total_size + 3) / 4 * 4; //final size aligned to word
+   
+   return m_args_aligned_size;
+
+}
+
+
 void function_info::finalize( memory_space *param_mem ) 
 {
    unsigned param_address = 0;
@@ -1087,13 +1127,17 @@ void function_info::finalize( memory_space *param_mem )
          size = (size<(p.get_size()/8))?size:(p.get_size()/8);
       } 
       // copy the parameter over word-by-word so that parameter that crosses a memory page can be copied over
+      //Jin: copy parameter using aligned rules
       const size_t word_size = 4; 
+      param_address = (param_address + size - 1) / size * size; //aligned with size 
       for (size_t idx = 0; idx < size; idx += word_size) {
          const char *pdata = reinterpret_cast<const char*>(param_value.pdata) + idx; // cast to char * for ptr arithmetic
          param_mem->write(param_address + idx, word_size, pdata,NULL,NULL); 
       }
+      unsigned offset = p.get_offset();
+      assert(offset == param_address);
       param->set_address(param_address);
-      param_address += size; 
+      param_address += size;
    }
 }
 
@@ -1414,10 +1458,11 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
       ptx_thread_info *thd = *thread_info;
       assert( thd->is_done() );
       if ( g_debug_execution==-1 ) {
+         int agg_group_id = thd->get_agg_group_id();
          dim3 ctaid = thd->get_ctaid();
          dim3 t = thd->get_tid();
-         printf("GPGPU-Sim PTX simulator:  thread exiting ctaid=(%u,%u,%u) tid=(%u,%u,%u) uid=%u\n",
-                ctaid.x,ctaid.y,ctaid.z,t.x,t.y,t.z, thd->get_uid() );
+         printf("GPGPU-Sim PTX simulator:  thread exiting agg_group_id = %d ctaid=(%u,%u,%u) tid=(%u,%u,%u) uid=%u\n",
+                agg_group_id, ctaid.x,ctaid.y,ctaid.z,t.x,t.y,t.z, thd->get_uid() );
          fflush(stdout);
       }
       thd->m_cta_info->register_deleted_thread(thd);
@@ -1455,7 +1500,8 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
    unsigned max_cta_per_sm = num_threads/cta_size; // e.g., 256 / 48 = 5 
    assert( max_cta_per_sm > 0 );
 
-   unsigned sm_idx = (tid/cta_size)*gpgpu_param_num_shaders + sid;
+   //unsigned sm_idx = (tid/cta_size)*gpgpu_param_num_shaders + sid;
+   unsigned sm_idx = hw_cta_id*gpgpu_param_num_shaders + sid;
 
    if ( shared_memory_lookup.find(sm_idx) == shared_memory_lookup.end() ) {
       if ( g_debug_execution >= 1 ) {
@@ -1480,6 +1526,7 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
 
    std::map<unsigned,memory_space*> &local_mem_lookup = local_memory_lookup[sid];
    while( kernel.more_threads_in_cta() ) {
+      int agg_group_id = kernel.get_next_agg_group_id();
       dim3 ctaid3d = kernel.get_next_cta_id();
       unsigned new_tid = kernel.get_next_thread_id();
       dim3 tid3d = kernel.get_next_thread_id_3d();
@@ -1498,8 +1545,9 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
          local_mem_lookup[new_tid] = local_mem;
       }
       thd->set_info(kernel.entry());
-      thd->set_nctaid(kernel.get_grid_dim());
+      thd->set_nctaid(kernel.get_grid_dim(agg_group_id));
       thd->set_ntid(kernel.get_cta_dim());
+      thd->set_agg_group_id(agg_group_id);
       thd->set_ctaid(ctaid3d);
       thd->set_tid(tid3d);
       if( kernel.entry()->get_ptx_version().extensions() ) 
@@ -1513,8 +1561,8 @@ unsigned ptx_sim_init_thread( kernel_info_t &kernel,
       cta_info->add_thread(thd);
       thd->m_local_mem = local_mem;
       if ( g_debug_execution==-1 ) {
-         printf("GPGPU-Sim PTX simulator:  allocating thread ctaid=(%u,%u,%u) tid=(%u,%u,%u) @ 0x%Lx\n",
-                ctaid3d.x,ctaid3d.y,ctaid3d.z,tid3d.x,tid3d.y,tid3d.z, (unsigned long long)thd );
+         printf("GPGPU-Sim PTX simulator:  allocating thread agg_group_id=%d ctaid=(%u,%u,%u) tid=(%u,%u,%u) @ 0x%Lx\n",
+                agg_group_id, ctaid3d.x,ctaid3d.y,ctaid3d.z,tid3d.x,tid3d.y,tid3d.z, (unsigned long long)thd );
          fflush(stdout);
       }
       active_threads.push_back(thd);
@@ -1552,7 +1600,7 @@ kernel_info_t *gpgpu_opencl_ptx_sim_init_grid(class function_info *entry,
       entry->add_param_data(argcount-argn,&(*a));
       argn++;
    }
-   entry->finalize(result->get_param_memory());
+   entry->finalize(result->get_param_memory(-1)); //native kernel param
    g_ptx_kernel_count++; 
    fflush(stdout);
 
@@ -1746,14 +1794,17 @@ void gpgpu_cuda_ptx_sim_main_func( kernel_info_t &kernel, bool openCL )
             g_the_gpu->getShaderCoreConfig()->warp_size
         );
         cta.execute();
+
+        launch_all_device_kernels();
     }
     
    //registering this kernel as done      
-   extern stream_manager *g_stream_manager;
    
    //openCL kernel simulation calls don't register the kernel so we don't register its exit
-   if(!openCL)
-   g_stream_manager->register_finished_kernel(kernel.get_uid());
+   if(!openCL) {
+      extern stream_manager *g_stream_manager;
+      g_stream_manager->register_finished_kernel(kernel.get_uid());
+   }
 
    //******PRINTING*******
    printf( "GPGPU-Sim: Done functional simulation (%u instructions simulated).\n", g_ptx_sim_num_insn );

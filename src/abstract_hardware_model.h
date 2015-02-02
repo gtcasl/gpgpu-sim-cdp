@@ -154,14 +154,22 @@ enum _memory_op_t {
 #include <stdlib.h>
 #include <map>
 #include <deque>
+#include <algorithm>
 
 #if !defined(__VECTOR_TYPES_H__)
 struct dim3 {
    unsigned int x, y, z;
 };
 #endif
+bool increment_x_then_y_then_z( dim3 &i, const dim3 &bound);
 
-void increment_x_then_y_then_z( dim3 &i, const dim3 &bound);
+//Jin: child kernel information for CDP
+#include "stream_manager.h"
+class stream_manager;
+struct CUstream_st;
+extern stream_manager * g_stream_manager;
+//Jin: aggregated block group
+class agg_block_group_t;
 
 class kernel_info_t {
 public:
@@ -192,7 +200,9 @@ public:
 
    size_t num_blocks() const
    {
-      return m_grid_dim.x * m_grid_dim.y * m_grid_dim.z;
+      size_t native_num_blocks = m_grid_dim.x * m_grid_dim.y * m_grid_dim.z;
+
+      return native_num_blocks + m_total_num_agg_blocks;
    }
 
    size_t threads_per_cta() const
@@ -200,12 +210,23 @@ public:
       return m_block_dim.x * m_block_dim.y * m_block_dim.z;
    } 
 
-   dim3 get_grid_dim() const { return m_grid_dim; }
+   dim3 get_grid_dim(int agg_group_id) const { 
+      if(agg_group_id == -1) //native kernel
+         return m_grid_dim; 
+      else
+         return get_agg_dim(agg_group_id);
+   }
    dim3 get_cta_dim() const { return m_block_dim; }
 
    void increment_cta_id() 
    { 
-      increment_x_then_y_then_z(m_next_cta,m_grid_dim); 
+      dim3 next_grid_dim = get_grid_dim(m_next_agg_group_id);
+      if(increment_x_then_y_then_z(m_next_cta, next_grid_dim)) { //overbound
+        m_next_agg_group_id++;
+        m_next_cta.x = 0;
+        m_next_cta.y = 0;
+        m_next_cta.z = 0;
+      }
       m_next_tid.x=0;
       m_next_tid.y=0;
       m_next_tid.z=0;
@@ -213,7 +234,9 @@ public:
    dim3 get_next_cta_id() const { return m_next_cta; }
    bool no_more_ctas_to_run() const 
    {
-      return (m_next_cta.x >= m_grid_dim.x || m_next_cta.y >= m_grid_dim.y || m_next_cta.z >= m_grid_dim.z );
+      return m_next_agg_group_id >= m_total_agg_group_id;
+      //return (m_next_cta.x >= m_grid_dim.x || m_next_cta.y >= m_grid_dim.y || m_next_cta.z >= m_grid_dim.z );
+
    }
 
    void increment_thread_id() { increment_x_then_y_then_z(m_next_tid,m_block_dim); }
@@ -230,7 +253,14 @@ public:
    std::string name() const;
 
    std::list<class ptx_thread_info *> &active_threads() { return m_active_threads; }
-   class memory_space *get_param_memory() { return m_param_mem; }
+   class memory_space *get_param_memory(int agg_group_id) { 
+
+      if(agg_group_id == -1) //native
+         return m_param_mem; 
+      else {
+         return get_agg_param_mem(agg_group_id);
+      }
+   }
 
 private:
    kernel_info_t( const kernel_info_t & ); // disable copy constructor
@@ -250,6 +280,65 @@ private:
 
    std::list<class ptx_thread_info *> m_active_threads;
    class memory_space *m_param_mem;
+
+public:
+   //Jin: parent and child kernel management for CDP
+   void set_parent(kernel_info_t * parent, int parent_agg_group_id, dim3 parent_ctaid, dim3 parent_tid);
+   void set_child(kernel_info_t * child);
+   void remove_child(kernel_info_t * child);
+   bool is_finished();
+   bool children_all_finished();
+   void notify_parent_finished();
+   CUstream_st * create_stream_cta(int agg_group_id, dim3 ctaid);
+   CUstream_st * get_default_stream_cta(int agg_group_id, dim3 ctaid);
+   bool cta_has_stream(int agg_group_id, dim3 ctaid, CUstream_st* stream);
+   void print_parent_info();
+   void destroy_cta_streams();
+   kernel_info_t * get_parent() { return m_parent_kernel; }
+
+private:
+   kernel_info_t * m_parent_kernel;
+   int m_parent_agg_group_id; // -1 means launched by native parent ctas
+   dim3 m_parent_ctaid;
+   dim3 m_parent_tid;
+   std::list<kernel_info_t *> m_child_kernels; //child kernel launched
+   //streams created in each CTA, indexed by (int agg_group_id, dim3 cta_id)
+   typedef std::pair<int, dim3> agg_block_id_t;
+   struct agg_block_id_comp {
+      bool operator() (const agg_block_id_t & a, const agg_block_id_t & b) const
+      {   
+          if(a.first < b.first)
+              return true;
+          else if(a.second.z < b.second.z)
+              return true;
+          else if(a.second.y < b.second.y)
+              return true;
+          else if (a.second.x < b.second.x)
+              return true;
+          else
+              return false;
+      }
+   };
+
+   std::map< agg_block_id_t, std::list<CUstream_st *>, agg_block_id_comp> m_cta_streams; 
+//Jin: aggregated cta management
+public:
+   void add_agg_block_group(agg_block_group_t * agg_block_group);
+   void destroy_agg_block_groups();
+   dim3 get_agg_dim(int agg_group_id) const;
+   class memory_space * get_agg_param_mem(int agg_group_id);
+   int get_next_agg_group_id() { return m_next_agg_group_id; }
+private:
+   int m_next_agg_group_id;
+   int m_total_agg_group_id;
+   std::map<int, agg_block_group_t *> m_agg_block_groups; //aggregated block groups
+   size_t m_total_num_agg_blocks; //total number of aggregated blocks
+//Jin: kernel timing
+public:
+   unsigned long long launch_cycle;
+   unsigned long long start_cycle;
+   unsigned long long end_cycle;
+   unsigned m_launch_latency;
 };
 
 struct core_config {
@@ -701,7 +790,6 @@ public:
 struct dram_callback_t {
    dram_callback_t() { function=NULL; instruction=NULL; thread=NULL; }
    void (*function)(const class inst_t*, class ptx_thread_info*);
-
    const class inst_t* instruction;
    class ptx_thread_info *thread;
 };
@@ -822,6 +910,7 @@ public:
         m_mem_accesses_created=false;
         m_cache_hit=false;
         m_is_printf=false;
+        m_is_cdp = 0;
     }
     virtual ~warp_inst_t(){
     }
@@ -851,7 +940,6 @@ public:
     	return m_warp_active_mask;
     }
     void completed( unsigned long long cycle ) const;  // stat collection: called when the instruction is completed  
-
     void set_addr( unsigned n, new_addr_type addr ) 
     {
         if( !m_per_scalar_thread_valid ) {
@@ -964,7 +1052,6 @@ public:
     void print( FILE *fout ) const;
     unsigned get_uid() const { return m_uid; }
 
-
 protected:
 
     unsigned m_uid;
@@ -994,6 +1081,11 @@ protected:
     std::list<mem_access_t> m_accessq;
 
     static unsigned sm_next_uid;
+
+    //Jin: cdp support
+public:
+    int m_is_cdp;
+    
 };
 
 void move_warp( warp_inst_t *&dst, warp_inst_t *&src );

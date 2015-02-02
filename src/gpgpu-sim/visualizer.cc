@@ -301,19 +301,19 @@ public:
       calculate_ld_dist();
       calculate_st_dist();
    }
-   void print_dist(void) {
+   void print_dist(FILE * fout) {
       unsigned i; 
       calculate_dist();
-      std::cout << "LD_mem_lat_dist " ;
+      fprintf(fout, "LD_mem_lat_dist ") ;
       for ( i=0;i<ld_vector_size;i++ ) {
-         std::cout <<" "<<(int)overal_ld_time_dist[i]; 
+         fprintf(fout, " %d", (int)overal_ld_time_dist[i]); 
       }
-      std::cout << std::endl;
-      std::cout << "ST_mem_lat_dist " ;
+      fprintf(fout, "\n");
+      fprintf(fout, "ST_mem_lat_dist ") ;
       for ( i=0;i<st_vector_size;i++ ) {
-         std::cout <<" "<<(int)overal_st_time_dist[i];
+         fprintf(fout, " %d", (int)overal_st_time_dist[i]); 
       }
-      std::cout << std::endl;
+      fprintf(fout, "\n");
    }
    void print_to_file(FILE *outfile) {
       unsigned i; 
@@ -352,8 +352,8 @@ void time_vector_create(int size) {
 }                               
 
 
-void time_vector_print(void) {
-   g_my_time_vector->print_dist();
+void time_vector_print(FILE * fout) {
+   g_my_time_vector->print_dist(fout);
 }
 
 void time_vector_print_interval2gzfile(gzFile outfile) {

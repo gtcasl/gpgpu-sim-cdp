@@ -250,10 +250,19 @@ struct CUctx_st {
 	{
 		if( m_code.find(fat_cubin_handle) != m_code.end() ) {
 			symbol *s = m_code[fat_cubin_handle]->lookup(deviceFun);
-			assert( s != NULL );
-			function_info *f = s->get_pc();
-			assert( f != NULL );
-			m_kernel_lookup[hostFun] = f;
+			if(s != NULL) {
+				function_info *f = s->get_pc();
+				assert( f != NULL );
+				m_kernel_lookup[hostFun] = f;
+			}
+			else {
+				printf("Warning: cannot find deviceFun %s\n", deviceFun);
+				m_kernel_lookup[hostFun] = NULL;
+			}
+	//		assert( s != NULL );
+	//		function_info *f = s->get_pc();
+	//		assert( f != NULL );
+	//		m_kernel_lookup[hostFun] = f;
 		} else {
 			m_kernel_lookup[hostFun] = NULL;
 		}
@@ -1306,7 +1315,7 @@ void extract_code_using_cuobjdump(){
 	printf("Running md5sum using \"%s\"\n", command);
 	system(command);
 	// Running cuobjdump using dynamic link to current process
-	snprintf(command,1000,"$CUDA_INSTALL_PATH/bin/cuobjdump -ptx -elf -sass %s > %s", app_binary.c_str(), fname);
+	snprintf(command,1000,"$CUDA_INSTALL_PATH/bin/cuobjdump -ptx -all %s > %s", app_binary.c_str(), fname);
 	printf("Running cuobjdump using \"%s\"\n", command);
 	bool parse_output = true; 
 	int result = system(command);
@@ -1492,7 +1501,7 @@ cuobjdumpELFSection* findELFSection(const std::string identifier){
 	if (sec!=NULL)return sec;
 	sec = findELFSectionInList(libSectionList, identifier);
 	if (sec!=NULL)return sec;
-	std::cout << "Cound not find " << identifier << std::endl;
+	std::cout << "Could not find " << identifier << std::endl;
 	assert(0 && "Could not find the required ELF section");
 	return NULL;
 }
@@ -1506,8 +1515,22 @@ cuobjdumpPTXSection* findPTXSectionInList(std::list<cuobjdumpSection*> sectionli
 	){
 		cuobjdumpPTXSection* ptxsection;
 		if((ptxsection=dynamic_cast<cuobjdumpPTXSection*>(*iter)) != NULL){
-			if(ptxsection->getIdentifier() == identifier)
-				return ptxsection;
+            std::string ptxId = ptxsection->getIdentifier();
+    		if(ptxId[ptxId.length() - 1] == ' ')
+	    		ptxId = ptxId.substr(0, ptxId.length()-1);
+
+            std::string compId = identifier;
+    		if(identifier[identifier.length() - 1] == ' ')
+	    		compId = identifier.substr(0, identifier.length()-1);
+
+            //Jin: hack
+            if(ptxId != compId)
+                printf("Warning: __cudaRegisterFatBinary needs %s, but find PTX section with %s\n", 
+                    compId.c_str(), ptxId.c_str());
+            return ptxsection;
+
+//			if(ptxId == compId)
+//				return ptxsection;
 		}
 	}
 	return NULL;
@@ -1519,7 +1542,7 @@ cuobjdumpPTXSection* findPTXSection(const std::string identifier){
 	if (sec!=NULL)return sec;
 	sec = findPTXSectionInList(libSectionList, identifier);
 	if (sec!=NULL)return sec;
-	std::cout << "Cound not find " << identifier << std::endl;
+	std::cout << "Could not find " << identifier << std::endl;
 	assert(0 && "Could not find the required PTX section");
 	return NULL;
 }
@@ -1537,7 +1560,7 @@ std::map<int, std::string> fatbinmap;
 std::map<int, bool>fatbin_registered;
 
 //! Keep track of the association between filename and cubin handle
-void cuobjdumpRegisterFatBinary(unsigned int handle, char* filename){
+void cuobjdumpRegisterFatBinary(unsigned int handle, std::string filename){
 	fatbinmap[handle] = filename;
 }
 
@@ -1607,7 +1630,14 @@ void** CUDARTAPI __cudaRegisterFatBinary( void *fatCubin )
 		// - This offset differs among different CUDA and GCC versions. 
 		char * pfatbin = (char*) fatDeviceText->d; 
 		int offset = *((int*)(pfatbin+48)); 
-		char * filename = (pfatbin+16+offset); 
+		char * tmpfilename = (pfatbin+16+offset); 
+		std::string filename;
+
+		//Jin: a hacky solution for triming the trailing space
+		if(tmpfilename[strlen(tmpfilename) - 1] == ' ')
+			filename = std::string(tmpfilename).substr(0, strlen(tmpfilename)-1);
+		else
+			filename = std::string(tmpfilename);
 
 		// The extracted file name is associated with a fat_cubin_handle passed
 		// into cudaLaunch().  Inside cudaLaunch(), the associated file name is
@@ -1617,7 +1647,7 @@ void** CUDARTAPI __cudaRegisterFatBinary( void *fatCubin )
 		// file name associated with each section. 
 		unsigned long long fat_cubin_handle = next_fat_bin_handle;
 		next_fat_bin_handle++;
-		printf("GPGPU-Sim PTX: __cudaRegisterFatBinary, fat_cubin_handle = %llu, filename=%s\n", fat_cubin_handle, filename);
+		printf("GPGPU-Sim PTX: __cudaRegisterFatBinary, fat_cubin_handle = %llu, filename=%s\n", fat_cubin_handle, filename.c_str());
 		/*!
 		 * This function extracts all data from all files in first call
 		 * then for next calls, only returns the appropriate number
@@ -1968,6 +1998,11 @@ __host__ cudaError_t CUDARTAPI cudaFuncSetCacheConfig(const char *func, enum cud
 	context->get_device()->get_gpgpu()->set_cache_config(context->get_kernel(func)->get_name(), (FuncCache)cacheConfig);
 	return g_last_cudaError = cudaSuccess;
 }
+
+//Jin: hack for cdp
+__host__ cudaError_t CUDARTAPI cudaDeviceSetLimit(enum cudaLimit limit, size_t value) {
+    return g_last_cudaError = cudaSuccess;
+}
 #endif
 
 #endif
@@ -2128,7 +2163,7 @@ kernel_info_t *gpgpu_cuda_ptx_sim_init_grid( const char *hostFun,
 		argn++;
 	}
 
-	entry->finalize(result->get_param_memory());
+	entry->finalize(result->get_param_memory(-1)); //native kernel param
 	g_ptx_kernel_count++;
 	fflush(stdout);
 

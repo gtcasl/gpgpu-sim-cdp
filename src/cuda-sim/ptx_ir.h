@@ -330,6 +330,11 @@ public:
    iterator const_iterator_end() { return m_consts.end();}
 
    void dump();
+   
+   //Jin: handle instruction group for cdp
+   symbol_table* start_inst_group();
+   symbol_table* end_inst_group();
+
 private:
    unsigned m_reg_allocator;
    unsigned m_shared_next;
@@ -347,6 +352,10 @@ private:
    std::list<symbol*> m_consts;
    std::map<std::string,function_info*> m_function_info_lookup;
    std::map<std::string,symbol_table*> m_function_symtab_lookup;
+   
+   //Jin: handle instruction group for cdp
+   unsigned m_inst_group_id;
+   std::map<std::string,symbol_table*> m_inst_group_symtab;
 };
 
 class operand_info {
@@ -1200,6 +1209,8 @@ public:
    {
       return m_args.size();
    }
+   unsigned get_args_aligned_size();
+
    const symbol* get_arg( unsigned n ) const
    {
       assert( n < m_args.size() );
@@ -1288,6 +1299,9 @@ private:
 
    static std::vector<ptx_instruction*> s_g_pc_to_insn; // a direct mapping from PC to instruction
    static unsigned sm_next_uid;
+   
+   //Jin: arg size for child kernels
+   int m_args_aligned_size;
 };
 
 class arg_buffer_t {

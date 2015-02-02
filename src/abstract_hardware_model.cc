@@ -28,6 +28,7 @@
 
 
 #include "abstract_hardware_model.h"
+#include "agg_block_group.h"
 #include "cuda-sim/memory.h"
 #include "cuda-sim/ptx_ir.h"
 #include "cuda-sim/ptx-stats.h"
@@ -550,6 +551,9 @@ void warp_inst_t::completed( unsigned long long cycle ) const
    ptx_file_line_stats_add_latency(pc, latency * active_count());  
 }
 
+//Jin: kernel launch latency and overhead
+unsigned g_kernel_launch_latency;
+extern unsigned long long g_total_param_size;
 
 unsigned kernel_info_t::m_next_uid = 1;
 
@@ -564,12 +568,25 @@ kernel_info_t::kernel_info_t( dim3 gridDim, dim3 blockDim, class function_info *
     m_next_tid=m_next_cta;
     m_num_cores_running=0;
     m_uid = m_next_uid++;
-    m_param_mem = new memory_space_impl<8192>("param",64*1024);
+    m_param_mem = new memory_space_impl<256>("param", 256);
+
+    //Jin: parent and child kernel management for CDP
+    m_parent_kernel = NULL;
+
+    //Jin: aggregated cta management
+    m_next_agg_group_id = -1; //start from native ctas
+    m_total_agg_group_id = 0;
+    m_total_num_agg_blocks = 0;
+
+    //Jin: launch latency management
+    m_launch_latency = g_kernel_launch_latency;
 }
 
 kernel_info_t::~kernel_info_t()
 {
     assert( m_active_threads.empty() );
+    destroy_cta_streams();
+    destroy_agg_block_groups();
     delete m_param_mem;
 }
 
@@ -577,6 +594,155 @@ std::string kernel_info_t::name() const
 {
     return m_kernel_entry->get_name();
 }
+
+//Jin: parent and child kernel management for CDP
+void kernel_info_t::set_parent(kernel_info_t * parent, 
+    int parent_agg_group_id,
+    dim3 parent_ctaid, dim3 parent_tid) {
+    m_parent_kernel = parent;
+    m_parent_agg_group_id = parent_agg_group_id;
+    m_parent_ctaid = parent_ctaid;
+    m_parent_tid = parent_tid;
+    parent->set_child(this);
+}
+
+void kernel_info_t::set_child(kernel_info_t * child) {
+    m_child_kernels.push_back(child);
+}
+
+void kernel_info_t::remove_child(kernel_info_t * child) {
+    assert(std::find(m_child_kernels.begin(), m_child_kernels.end(), child)
+        != m_child_kernels.end());
+    m_child_kernels.remove(child);
+}
+
+bool kernel_info_t::is_finished() {
+  if(done() && children_all_finished())
+     return true;
+  else
+     return false;
+}
+
+bool kernel_info_t::children_all_finished() {
+   if(!m_child_kernels.empty())
+         return false;
+   
+   return true;
+}
+
+void kernel_info_t::notify_parent_finished() {
+   if(m_parent_kernel) {
+       g_total_param_size -= ((m_kernel_entry->get_args_aligned_size() + 255)/256*256);
+       m_parent_kernel->remove_child(this);
+       g_stream_manager->register_finished_kernel(m_parent_kernel->get_uid());
+   }
+}
+
+CUstream_st * kernel_info_t::create_stream_cta(int agg_group_id, dim3 ctaid) {
+    assert(get_default_stream_cta(agg_group_id, ctaid));
+    CUstream_st * stream = new CUstream_st();
+    g_stream_manager->add_stream(stream);
+    
+    agg_block_id_t agg_block_id(agg_group_id, ctaid);
+    assert(m_cta_streams.find(agg_block_id) != m_cta_streams.end());
+    assert(m_cta_streams[agg_block_id].size() >= 1); //must have default stream
+    m_cta_streams[agg_block_id].push_back(stream);
+
+    return stream;
+}
+
+CUstream_st * kernel_info_t::get_default_stream_cta(int agg_group_id, dim3 ctaid) {
+
+    agg_block_id_t agg_block_id(agg_group_id, ctaid);
+    if(m_cta_streams.find(agg_block_id) != m_cta_streams.end()) {
+       assert(m_cta_streams[agg_block_id].size() >= 1); //already created, must have default stream
+       return *(m_cta_streams[agg_block_id].begin());
+    }
+    else {
+      m_cta_streams[agg_block_id] = std::list<CUstream_st *>();
+      CUstream_st * stream = new CUstream_st();
+      g_stream_manager->add_stream(stream);
+      m_cta_streams[agg_block_id].push_back(stream);
+      return stream;
+    }
+}
+
+bool kernel_info_t::cta_has_stream(int agg_group_id, dim3 ctaid, CUstream_st* stream) {
+    agg_block_id_t agg_block_id(agg_group_id, ctaid);
+    if(m_cta_streams.find(agg_block_id) == m_cta_streams.end())
+       return false;
+
+    std::list<CUstream_st *> &stream_list = m_cta_streams[agg_block_id];
+    if(std::find(stream_list.begin(), stream_list.end(), stream) 
+         == stream_list.end())
+       return false;
+    else
+       return true;
+}
+
+void kernel_info_t::print_parent_info() {
+    if(m_parent_kernel) {
+        printf("Parent %d: \'%s\', Agg Group %d, Block (%d, %d, %d), Thread (%d, %d, %d)\n", 
+            m_parent_kernel->get_uid(), m_parent_kernel->name().c_str(), 
+            m_parent_agg_group_id,
+            m_parent_ctaid.x, m_parent_ctaid.y, m_parent_ctaid.z,
+            m_parent_tid.x, m_parent_tid.y, m_parent_tid.z);
+    }
+}
+
+void kernel_info_t::destroy_cta_streams() {
+   printf("Destroy streams for kernel %d: ", get_uid());
+   size_t stream_size = 0;
+   for(auto s = m_cta_streams.begin(); s != m_cta_streams.end(); s++) {
+       stream_size += s->second.size();
+       for(auto ss = s->second.begin(); ss != s->second.end(); ss++)
+          g_stream_manager->destroy_stream(*ss);
+       s->second.clear();
+   }
+   printf("size %lu\n", stream_size);
+   m_cta_streams.clear();
+}
+
+//Jin: aggregated cta management
+void kernel_info_t::add_agg_block_group(agg_block_group_t * agg_block_group) {
+    
+    dim3 block_dim = agg_block_group->get_block_dim();
+    //for now, only support same cta configuration
+    assert(block_dim.x == m_block_dim.x && block_dim.y == m_block_dim.y 
+        && block_dim.z == m_block_dim.z);
+    
+    m_total_num_agg_blocks += agg_block_group->get_num_blocks();
+    
+    assert(m_agg_block_groups.find(m_total_agg_group_id) ==
+        m_agg_block_groups.end());
+    m_agg_block_groups[m_total_agg_group_id] = agg_block_group;
+    
+    m_total_agg_group_id++;
+}
+
+void kernel_info_t::destroy_agg_block_groups() {
+    for(auto agg_block_group = m_agg_block_groups.begin(); 
+        agg_block_group != m_agg_block_groups.end();
+        agg_block_group++) {
+        g_total_param_size -= ((m_kernel_entry->get_args_aligned_size() + 255)/256*256);
+        delete agg_block_group->second;
+    }
+
+    m_agg_block_groups.clear();
+}
+
+dim3 kernel_info_t::get_agg_dim(int agg_group_id) const {
+    assert(m_agg_block_groups.find(agg_group_id) !=
+        m_agg_block_groups.end());
+    return m_agg_block_groups.find(agg_group_id)->second->get_agg_dim();
+}
+
+class memory_space * kernel_info_t::get_agg_param_mem(int agg_group_id) {
+    assert(m_agg_block_groups.find(agg_group_id) !=
+        m_agg_block_groups.end());
+    return m_agg_block_groups.find(agg_group_id)->second->get_param_memory();
+}
+
 
 simt_stack::simt_stack( unsigned wid, unsigned warpSize)
 {

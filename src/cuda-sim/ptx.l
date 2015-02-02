@@ -180,6 +180,7 @@ breakaddr  TC; ptx_lval.int_value = BREAKADDR_OP; return OPCODE;
 \.union  TC; return UNION_DIRECTIVE; /* not in PTX 2.1 */
 \.version TC; return VERSION_DIRECTIVE;
 \.visible TC; return VISIBLE_DIRECTIVE;
+\.weak TC; return WEAK_DIRECTIVE;
 \.address_size TC; return ADDRESS_SIZE_DIRECTIVE;
 
 \.constptr TC; return CONSTPTR_DIRECTIVE; /* Ptx plus directive for pointer to constant memory */
@@ -335,8 +336,6 @@ breakaddr  TC; ptx_lval.int_value = BREAKADDR_OP; return OPCODE;
 \.dec	TC; return ATOMIC_DEC;
 \.min	TC; return ATOMIC_MIN;
 \.max	TC; return ATOMIC_MAX;
-
-
 
 \.1d	TC; return GEOM_MODIFIER_1D;
 \.2d	TC; return GEOM_MODIFIER_2D;
