@@ -2747,7 +2747,6 @@ bool barrier_set_t::warp_waiting_at_barrier( unsigned warp_id ) const
 }
 
 void barrier_set_t::dump()
->>>>>>> gpgpusim-cdp/gpgpusim-cdp
 {
    printf( "barrier set information\n");
    printf( "  m_max_cta_per_core = %u\n",  m_max_cta_per_core );

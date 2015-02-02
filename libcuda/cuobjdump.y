@@ -99,7 +99,6 @@ headerinfo :	H_SEPARATOR NEWLINE
 				H_PRODUCER IDENTIFIER NEWLINE
 				H_HOST IDENTIFIER NEWLINE
 				H_COMPILESIZE IDENTIFIER NEWLINE
-				H_IDENTIFIER FILENAME emptylines {setCuobjdumparch($4); setCuobjdumpidentifier($19);};
 				cline
 				H_IDENTIFIER FILENAME emptylines {setCuobjdumparch($4); setCuobjdumpidentifier($20);};
 
