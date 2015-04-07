@@ -14,7 +14,7 @@ Refer to the original installation instructions in GPGPU-Sim. Note that to
 use the CDP feature in this version, make sure to compile the CUDA program
 with sm_35 architecture option.
 
-# The origin README from GPGPU-Sim:
+# The original README from GPGPU-Sim:
 Welcome to GPGPU-Sim, a cycle-level simulator modeling contemporary graphics
 processing units (GPUs) running GPU computing workloads written in CUDA or
 OpenCL. Also included in GPGPU-Sim is a performance visualization tool called
