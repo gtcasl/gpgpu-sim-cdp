@@ -4,6 +4,7 @@ Currently the following features and modifications have been made available.
 * Kernel launch from device
 * Parent-Child synchronization is not supported (i.e. no support for
 cudaDeviceSynchronize on device)
+* Device-side CUDA Streams are supported.
 * Concurrent kernel execution is supported (for both host and device kernel
 launches)
 * Limited support for CUDA 6.5 and sm_35 at runtime and PTX.
