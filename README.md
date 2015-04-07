@@ -1,7 +1,8 @@
 # README for GPGPU-Sim-CDP
 This is a preliminary support of CUDA Dynamic Parallelism on GPGPU-Sim.
 Currently the following features and modifications have been made available.
-* Kernel launch from device
+* Kernel launch from device is upported (i.e. cudaGetParameterBuffer and 
+cudaLaunchDevice are supported)
 * Parent-Child synchronization is not supported (i.e. no support for
 cudaDeviceSynchronize on device)
 * Device-side CUDA Streams are supported.
