@@ -10,6 +10,12 @@ cudaDeviceSynchronize on device)
 launches)
 * Limited support for CUDA 6.5 and sm_35 at runtime and PTX.
 
+The authors have been using GPGPU-Sim-CDP for another project 
+[`Dragon_li`](http://gpuocelot.gatech.edu/dragon_li/)
+as they were investigation Dynamic Parallelism in irregular CUDA
+applications. GPGPU-Sim-CDP has not been fully tested for
+othe CUDA CDP benchmarks such as CUDA SDK.
+
 Refer to the original installation instructions in GPGPU-Sim to install
 GPGPU-Sim-CDP. Extra requirements are the following:
 * Make sure to compile your CUDA programs with CUDA toolkit 6.5. GPGPU-Sim-CDP
